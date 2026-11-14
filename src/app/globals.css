@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f5f7;
+  --foreground: #1c2128;
+  --paper: #ffffff;
+  --ink: #1c2128;
+  --muted: #4b5563;
+  --line: #e3e6eb;
+  --accent: #0f4c81;
+  --accent-deep: #0c3c66;
+  --accent-soft: #e7f0f8;
+  --accent-fill: #0f4c81;
+  --on-accent: #ffffff;
+  --copper: #0f4c81;
+  --copper-deep: #0c3c66;
+  --pine: #0d6b45;
+  --pine-soft: #e6f5ee;
+  --amber: #8a5a00;
+  --amber-soft: #fbf3e0;
+  --danger: #9b2c2c;
+  --danger-soft: #fdecec;
+  --card: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --background: #101318;
+  --foreground: #e8eaed;
+  --paper: #181c22;
+  --ink: #e8eaed;
+  --muted: #b7c0ca;
+  --line: #2c333d;
+  --accent: #8eb8e5;
+  --accent-deep: #c5dcf4;
+  --accent-soft: #1c2c3e;
+  --accent-fill: #8eb8e5;
+  --on-accent: #101318;
+  --copper: #8eb8e5;
+  --copper-deep: #c5dcf4;
+  --pine: #8ed4b0;
+  --pine-soft: #163026;
+  --amber: #f0c56a;
+  --amber-soft: #332816;
+  --danger: #f0b0aa;
+  --danger-soft: #3a2220;
+  --card: #1c2128;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fill: var(--accent-fill);
+  --color-on-accent: var(--on-accent);
+  --color-copper: var(--copper);
+  --color-copper-deep: var(--copper-deep);
+  --color-pine: var(--pine);
+  --color-pine-soft: var(--pine-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-card: var(--card);
+  --font-sans: var(--font-plex);
+  --font-mono: var(--font-plex-mono);
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 28px rgb(16 24 40 / 0.06);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}

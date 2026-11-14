@@ -1,0 +1,358 @@
+"use client";
+
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ApprovalPanel } from "@/components/ApprovalPanel";
+import { intakeFromExample, IntakeForm, toIntake, type FormValue } from "@/components/IntakeForm";
+import { IconMoon, IconSun } from "@/components/icons";
+import { Comparison, RecommendationBanner } from "@/components/OptionCard";
+import { ProgressRail, type Phase } from "@/components/ProgressRail";
+import { SourcesPanel } from "@/components/SourcesPanel";
+import { parseFreeText } from "@/lib/freetext";
+import { parseIntake } from "@/lib/intake";
+import { PATH_META } from "@/lib/paths";
+import { consumeSseBuffer } from "@/lib/sse";
+import type { PathCard, PathId, Recommendation, StatusEvent } from "@/lib/types";
+
+const INITIAL_FORM: FormValue = {
+  sentence: "",
+  manufacturer: "",
+  partNumber: "",
+  symptom: "",
+  country: "FI",
+  urgency: "emergency",
+  notes: "",
+};
+
+const IDLE: Record<PathId, Phase> = {
+  diy: "idle",
+  repair: "idle",
+  used: "idle",
+  new: "idle",
+  obsolete: "idle",
+};
+
+export function ResearchApp() {
+  const [form, setForm] = useState<FormValue>(INITIAL_FORM);
+  const [running, setRunning] = useState(false);
+  const [message, setMessage] = useState("Waiting for a unit.");
+  const [elapsed, setElapsed] = useState(0);
+  const [phases, setPhases] = useState(IDLE);
+  const [cards, setCards] = useState<PathCard[]>([]);
+  const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
+  const [selected, setSelected] = useState<PathId | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [finishedAt, setFinishedAt] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const reasonRef = useRef<"user" | "timeout" | null>(null);
+  const runRef = useRef(0);
+
+  useEffect(() => {
+    if (!running) return;
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsed(Math.max(0, Math.round((Date.now() - started) / 1000)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  useEffect(() => {
+    if (!selected) return;
+    document.getElementById("approval")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selected]);
+
+  function stop(reason: "user" | "timeout") {
+    reasonRef.current = reason;
+    abortRef.current?.abort();
+  }
+
+  function searchSentence(sentence: string) {
+    const parsed = parseFreeText(sentence);
+    if (!parsed.ok) {
+      setError(parsed.message);
+      return;
+    }
+    void start({
+      sentence,
+      manufacturer: parsed.intake.manufacturer,
+      partNumber: parsed.intake.partNumber,
+      symptom: parsed.intake.symptom,
+      country: parsed.intake.country,
+      urgency: parsed.intake.urgency,
+      notes: form.notes,
+    });
+  }
+
+  async function start(next: FormValue) {
+    const parsed = parseIntake(toIntake(next));
+    if (!parsed.ok) {
+      setError(parsed.message);
+      return;
+    }
+
+    const runId = runRef.current + 1;
+    runRef.current = runId;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    reasonRef.current = null;
+    const timeout = window.setTimeout(() => stop("timeout"), 50_000);
+
+    setForm(next);
+    setRunning(true);
+    setError(null);
+    setCards([]);
+    setRecommendation(null);
+    setSelected(null);
+    setFinishedAt(null);
+    setElapsed(0);
+    setMessage("Starting the live search.");
+    setPhases({
+      diy: "running",
+      repair: "running",
+      used: "running",
+      new: "running",
+      obsolete: "running",
+    });
+
+    try {
+      const response = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.intake),
+        signal: controller.signal,
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!response.ok || !contentType.includes("text/event-stream")) {
+        setPhases(IDLE);
+        setCards([]);
+        const payload: { message?: string } = await response.json().catch(() => ({}));
+        throw new Error(payload.message || `The search could not start (${response.status}).`);
+      }
+      if (!response.body) throw new Error("The search returned an empty stream.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const parsedBuffer = consumeSseBuffer(buffer);
+        buffer = parsedBuffer.rest;
+        for (const frame of parsedBuffer.events) applyFrame(frame.event, frame.data);
+      }
+    } catch (caught) {
+      if (runRef.current !== runId) return;
+      setPhases((current) => {
+        const next = { ...current };
+        for (const id of Object.keys(next) as PathId[]) {
+          if (next[id] === "running") next[id] = "error";
+        }
+        return next;
+      });
+      if (reasonRef.current === "user") {
+        setError("Search cancelled. Nothing was sent.");
+      } else if (reasonRef.current === "timeout") {
+        setError("Stopped after 50 seconds so the page does not hang.");
+      } else if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+        setError(caught instanceof Error ? caught.message : "The search failed.");
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (runRef.current === runId) setRunning(false);
+    }
+  }
+
+  function applyFrame(event: string, raw: string) {
+    const data: unknown = JSON.parse(raw);
+    if (event === "status") {
+      const status = data as StatusEvent;
+      setMessage(status.message);
+      if (status.pathId && status.state) {
+        const pathId = status.pathId;
+        const state = status.state;
+        setPhases((current) => ({ ...current, [pathId]: state }));
+      }
+      return;
+    }
+    if (event === "path") {
+      const card = data as PathCard;
+      setCards((current) => [...current.filter((item) => item.id !== card.id), card]);
+      setPhases((current) => ({
+        ...current,
+        [card.id]: card.status === "error" ? "error" : "done",
+      }));
+      return;
+    }
+    if (event === "recommendation") {
+      setRecommendation(data as Recommendation);
+      return;
+    }
+    if (event === "report") {
+      const report = data as {
+        cards: PathCard[];
+        recommendation: Recommendation;
+        generatedAt: string;
+      };
+      setCards(report.cards);
+      setRecommendation(report.recommendation);
+      setFinishedAt(report.generatedAt);
+      setMessage("Search finished. Pick an option to prepare the next step.");
+      setPhases((current) => {
+        const next = { ...current };
+        for (const meta of PATH_META) {
+          const card = report.cards.find((item) => item.id === meta.id);
+          next[meta.id] = !card ? "error" : card.status === "error" ? "error" : "done";
+        }
+        return next;
+      });
+      return;
+    }
+    if (event === "error") {
+      const payload = data as { message?: string };
+      setError(payload.message ?? "The search failed.");
+    }
+  }
+
+  const ordered = PATH_META.map((meta) => cards.find((card) => card.id === meta.id) ?? null);
+  const showBoard = running || cards.length > 0;
+  const selectedCard = cards.find((card) => card.id === selected) ?? null;
+  const intake = toIntake(form);
+
+  const recommendedCard = cards.find((card) => card.id === recommendation?.pathId) ?? null;
+
+  return (
+    <div className="min-h-full">
+      <a
+        href="#search"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-card focus:px-3 focus:py-2"
+      >
+        Skip to search
+      </a>
+      <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent-fill font-mono text-xs font-medium text-on-accent">
+              RB
+            </span>
+            <div>
+              <p className="font-medium leading-none tracking-tight">Repair Butler</p>
+              <p className="mt-1 text-xs text-muted">Sourced decisions for the workshop</p>
+            </div>
+          </div>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+        <section>
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-accent">
+            For maintenance technicians
+          </p>
+          <h1 className="mt-2 max-w-3xl text-3xl font-medium tracking-tight sm:text-4xl">
+            Find a sourced next step for a dead industrial unit.
+          </h1>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted">
+            Paste the fault. Five live searches compare a DIY fix, a repair shop, a used unit, a new
+            unit, and a successor. Every price and lead time links to the page it came from.
+          </p>
+        </section>
+
+        <div id="search">
+        <IntakeForm
+          value={form}
+          onChange={setForm}
+          running={running}
+          onCancel={() => stop("user")}
+          onSubmit={() => {
+            if (form.sentence.trim() && (!form.manufacturer.trim() || !form.partNumber.trim())) {
+              searchSentence(form.sentence);
+              return;
+            }
+            void start(form);
+          }}
+          onSentence={searchSentence}
+          onExample={(exampleId) => {
+            const next = intakeFromExample(exampleId);
+            if (next) void start(next);
+          }}
+        />
+        </div>
+
+        {error ? (
+          <p role="alert" className="rounded-xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger">
+            {error}
+          </p>
+        ) : null}
+
+        {running ? <ProgressRail phases={phases} message={message} elapsed={elapsed} /> : null}
+
+        {recommendation ? <RecommendationBanner recommendation={recommendation} card={recommendedCard} /> : null}
+
+        {showBoard && !running ? (
+          <p className="text-sm text-muted">Checked five paths in {elapsed}s.</p>
+        ) : null}
+
+        {showBoard ? (
+          <Comparison
+            cards={ordered}
+            running={running}
+            recommendation={recommendation}
+            selected={selected}
+            onSelect={setSelected}
+          />
+        ) : null}
+
+        {selectedCard ? <ApprovalPanel card={selectedCard} intake={intake} /> : null}
+
+        {cards.length > 0 ? <SourcesPanel cards={cards} recommendation={recommendation} /> : null}
+
+        <footer className="border-t border-line pt-4 text-sm leading-relaxed text-muted">
+          <p>
+            Sources are live pages retrieved through Exa for this search. Repair Butler does not
+            place orders or send email.
+            {finishedAt ? ` Finished ${finishedAt}.` : ""}
+          </p>
+          <p className="mt-2">
+            Built for plant engineers and shops like JP Electronix AB, where the next step on a
+            dead HMI, PLC, or drive has to be sourced before anyone spends money.
+          </p>
+        </footer>
+      </main>
+    </div>
+  );
+}
+
+function subscribeTheme(onStoreChange: () => void) {
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+function ThemeToggle() {
+  const dark = useSyncExternalStore(
+    subscribeTheme,
+    () => document.documentElement.dataset.theme === "dark",
+    () => false,
+  );
+
+  function toggle() {
+    const next = dark ? "light" : "dark";
+    if (next === "dark") document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    localStorage.setItem("rb-theme", next);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={dark}
+      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-sm font-medium"
+    >
+      {dark ? <IconSun /> : <IconMoon />}
+      {dark ? "Light mode" : "Dark mode"}
+    </button>
+  );
+}
+
