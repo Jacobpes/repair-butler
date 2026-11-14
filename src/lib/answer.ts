@@ -1,5 +1,5 @@
 import { countryName } from "@/lib/countries";
-import { sourcedLeadDays } from "@/lib/evidence";
+import { sourceMatchesIntake, sourcedLeadDays } from "@/lib/evidence";
 import type { Intake, PathCard, PathId, Recommendation, Source } from "@/lib/types";
 import { clip, isNotFound, looksQuantitative } from "@/lib/text";
 
@@ -164,7 +164,8 @@ export function recommendationFromAnswer(
   if (!reason) {
     return fallbackRecommendation(intake, cards, "Exa Answer did not give a reason.");
   }
-  if (looksQuantitative(reason) && citations.length === 0) {
+  const relevantCitations = citations.filter((citation) => sourceMatchesIntake(citation, intake));
+  if (looksQuantitative(reason) && relevantCitations.length === 0) {
     reason =
       "Exa Answer included figures without citations, so those figures are withheld. Use the sourced numbers on the cards.";
   }
@@ -182,7 +183,7 @@ export function recommendationFromAnswer(
     reason,
     urgencyNote,
     caveats,
-    sources: citations.slice(0, 6),
+    sources: relevantCitations.slice(0, 6),
     via: "exa-answer",
     fastestPathId: null,
     fastestNote: "",

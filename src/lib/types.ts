@@ -110,6 +110,7 @@ export type PathPlan = {
   userLocation?: string;
   objective: string;
   partNumber: string;
+  manufacturer: string;
   country: string;
   symptom: string;
   familyTerms: string[];

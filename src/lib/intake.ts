@@ -1,4 +1,5 @@
 import { isCountryCode } from "@/lib/countries";
+import { parseFreeText } from "@/lib/freetext";
 import type { Intake, Urgency } from "@/lib/types";
 import { asRecord } from "@/lib/text";
 
@@ -23,9 +24,21 @@ export function parseIntake(input: unknown): ParseResult {
   const partNumber = clean(record.partNumber, 80);
   const symptom = clean(record.symptom, 500);
   const notes = clean(record.notes, 400);
+  const query = clean(record.query, 500);
   const country =
     typeof record.country === "string" ? record.country.trim().toUpperCase() : "";
   const urgency = record.urgency;
+
+  if (query && manufacturer.length < 2 && partNumber.length < 2) {
+    const parsed = parseFreeText(query);
+    if (!parsed.ok) return parsed;
+    if (isCountryCode(country)) parsed.intake.country = country;
+    if (typeof urgency === "string" && URGENCIES.has(urgency as Urgency)) {
+      parsed.intake.urgency = urgency as Urgency;
+    }
+    if (notes) parsed.intake.notes = notes;
+    return parsed;
+  }
 
   if (manufacturer.length < 2) {
     return { ok: false, message: "Enter the manufacturer." };

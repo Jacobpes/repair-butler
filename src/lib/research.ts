@@ -5,6 +5,7 @@ import {
   recommendationFromAnswer,
 } from "@/lib/answer";
 import { buildCard, mergeHitsIntoRaw } from "@/lib/claims";
+import { rehomeRepairHits } from "@/lib/evidence";
 import { EXTRACTION_PROMPT, HIGHLIGHT_QUERY, buildPathPlans, extraSearches } from "@/lib/paths";
 import type { Intake, PathCard, PathPlan, RawHit, RawSearch, Source } from "@/lib/types";
 import { normalizeUrl, siteHost } from "@/lib/text";
@@ -108,41 +109,41 @@ export async function runResearch(args: {
       try {
         const raw = await searchPath(exa, plan, args.signal);
         raws.set(plan.id, raw);
-        const card = buildCard(plan, raw);
-        card.timingMs = Date.now() - started;
-        args.send("path", card);
         args.send("status", {
-          message: `${plan.title} returned ${card.sources.length} source${card.sources.length === 1 ? "" : "s"}.`,
+          message: `${plan.title} search returned.`,
           pathId: plan.id,
-          state: card.status === "error" ? "error" : "done",
+          state: "done",
         });
-        return card;
+        return Date.now() - started;
       } catch (error) {
         console.error(`Exa ${plan.id} failed`, error instanceof Error ? error.message : error);
         const raw = { error: publicErrorMessage(error) };
         raws.set(plan.id, raw);
-        const card = buildCard(plan, raw);
-        card.timingMs = Date.now() - started;
-        args.send("path", card);
         args.send("status", {
-          message: card.error ?? `${plan.title} failed.`,
+          message: raw.error,
           pathId: plan.id,
           state: "error",
         });
-        return card;
+        return Date.now() - started;
       }
     }),
   );
 
   if (args.signal.aborted) return;
 
+  rehomeRepairHits(plans, raws);
+  let cards = plans.map((plan, index) => {
+    const card = buildCard(plan, raws.get(plan.id) ?? { results: [] });
+    card.timingMs = searched[index];
+    args.send("path", card);
+    return card;
+  });
+
   args.send("status", {
     message: "Reading the best page on each path with Exa Contents (text, highlights, summary).",
   });
-
-  let cards = searched;
   try {
-    cards = await enrichWithContents(exa, plans, raws, searched, args.signal);
+    cards = await enrichWithContents(exa, plans, raws, cards, args.signal);
     for (const card of cards) args.send("path", card);
   } catch (error) {
     console.error("Exa contents failed", error instanceof Error ? error.message : error);

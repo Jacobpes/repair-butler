@@ -99,7 +99,9 @@ test("unsourced prices are withheld and overlapping failure notes are kept", () 
 });
 
 test("a grounded price keeps its citation, quote, and date", () => {
-  const card = buildCard(diyPlan(), {
+  const fresh = buildPathPlans(intake, now).find((item) => item.id === "new");
+  if (!fresh) throw new Error("missing new plan");
+  const card = buildCard(fresh, {
     output: {
       content: {
         headline: "Refurbished stock is listed.",

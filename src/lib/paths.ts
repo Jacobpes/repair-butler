@@ -1,5 +1,5 @@
 import { countryName } from "@/lib/countries";
-import { familyTerms } from "@/lib/part";
+import { familyTerms, partNumberVariants } from "@/lib/part";
 import type { Intake, PathPlan } from "@/lib/types";
 
 export const PATH_META = [
@@ -87,7 +87,10 @@ function note(intake: Intake): string {
 function finish(
   intake: Intake,
   now: Date,
-  plan: Omit<PathPlan, "partNumber" | "country" | "symptom" | "familyTerms" | "asOf" | "numResults"> & {
+  plan: Omit<
+    PathPlan,
+    "partNumber" | "manufacturer" | "country" | "symptom" | "familyTerms" | "asOf" | "numResults"
+  > & {
     numResults?: number;
   },
 ): PathPlan {
@@ -95,6 +98,7 @@ function finish(
     ...plan,
     numResults: plan.numResults ?? 5,
     partNumber: intake.partNumber,
+    manufacturer: intake.manufacturer,
     country: intake.country,
     symptom: intake.symptom,
     familyTerms: familyTerms(intake),
@@ -106,7 +110,10 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
   const part = partLabel(intake);
   const place = countryName(intake.country);
   const extra = note(intake);
-  const exact = `Only pages that show the exact part number ${intake.partNumber}.`;
+  const family = familyTerms(intake).join(" ");
+  const variants = partNumberVariants(intake.partNumber)
+    .map((item) => `"${item}"`)
+    .join(" OR ");
 
   return [
     finish(intake, now, {
@@ -114,7 +121,8 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
       title: "DIY repair",
       summary: "Failure modes and published fixes",
       searchType: "auto",
-      query: `Known failure modes and repair procedures for a ${part} with this symptom: ${intake.symptom}. Field reports, service manuals, and repair notes. ${exact}${extra}`,
+      query: `Failure modes, alarms, and repair notes for ${part} ${family}. Symptom: ${intake.symptom}. Field reports and service manuals.${extra}`,
+      numResults: 8,
       excludeDomains: [...MARKETPLACES, ...SOCIAL],
       objective: OBJECTIVE,
     }),
@@ -125,7 +133,8 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
       searchType: "auto",
       category: "company",
       userLocation: intake.country,
-      query: `Companies that repair a ${part} for customers in ${place}. The page must name this model or its family. Published repair price or turnaround, if the page states it. Symptom: ${intake.symptom}. ${exact}${extra}`,
+      query: `Repair workshop for ${part} ${family}. Control Board Lab, FOXON, or another specialist. Flat-rate repair price or turnaround if the page states it. Symptom: ${intake.symptom}.${extra}`,
+      numResults: 8,
       excludeDomains: [...MARKETPLACES, ...SOCIAL],
       objective: OBJECTIVE,
     }),
@@ -137,8 +146,8 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
       userLocation: intake.country,
       includeDomains: LISTING_DOMAINS,
       startPublishedDate: publishedAfter(now, 18),
-      numResults: 8,
-      query: `Current used or refurbished ${part} for sale, with price and condition. Prefer sellers who can ship to ${place}. ${exact}${extra}`,
+      numResults: 12,
+      query: `${variants} used OR refurbished listing, price and condition. Prefer sellers who can ship to ${place}.${extra}`,
       objective: OBJECTIVE,
     }),
     finish(intake, now, {
@@ -147,9 +156,9 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
       summary: "Distributors and stock",
       searchType: "fast",
       userLocation: intake.country,
-      numResults: 8,
+      numResults: 10,
       excludeDomains: SOCIAL,
-      query: `New ${part} from a distributor or the manufacturer, including stock and price when the page publishes them. Prefer supply to ${place}. ${exact}${extra}`,
+      query: `${variants} new from a distributor or the manufacturer. Stock, price, and condition when the page publishes them. Prefer supply to ${place}.${extra}`,
       objective: OBJECTIVE,
     }),
     finish(intake, now, {
@@ -159,10 +168,10 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
       searchType: "deep",
       excludeDomains: [...MARKETPLACES, ...SOCIAL],
       additionalQueries: [
-        `${intake.partNumber} discontinuation notice successor`,
-        `${intake.partNumber} official replacement part number migration`,
+        `${intake.partNumber} ${family} discontinuation notice successor`,
+        `${family} ${intake.symptom} replacement migration`,
       ],
-      query: `Is the ${part} discontinued, and what is the official successor or a compatible replacement? Include migration notes when a page states them. ${exact}${extra}`,
+      query: `Is ${part} ${family} discontinued, and what is the official successor? Migration notes and the symptom: ${intake.symptom}.${extra}`,
       objective: OBJECTIVE,
     }),
   ];
@@ -170,25 +179,35 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
 
 export function extraSearches(plan: PathPlan): PathPlan[] {
   if (plan.id === "used") {
+    return partNumberVariants(plan.partNumber).slice(0, 2).map((variant) => ({
+      ...plan,
+      numResults: 15,
+      userLocation: undefined,
+      includeDomains: SURPLUS_DOMAINS,
+      startPublishedDate: undefined,
+      query: `"${variant}" (used OR refurbished OR surplus) price stock condition site product`,
+    }));
+  }
+  if (plan.id === "repair") {
+    const family = plan.familyTerms.join(" ");
     return [
       {
         ...plan,
         numResults: 8,
         userLocation: undefined,
-        includeDomains: SURPLUS_DOMAINS,
-        query: `Surplus or refurbished ${plan.partNumber} in stock at Radwell, PLC City, EU Automation, or another industrial reseller. Exact part number ${plan.partNumber}. Price and condition.`,
+        category: undefined,
+        includeDomains: undefined,
+        searchType: "auto",
+        query: `Repair service ${plan.partNumber} ${family}. Control Board Lab, FOXON, BVS Electronics. Flat rate repair price or turnaround.`,
       },
-    ];
-  }
-  if (plan.id === "repair") {
-    const family = plan.familyTerms.length ? ` Family: ${plan.familyTerms.join(", ")}.` : "";
-    return [
       {
         ...plan,
         numResults: 5,
         userLocation: undefined,
-        includeDomains: undefined,
-        query: `European specialist that repairs ${plan.partNumber}.${family} The page must name that model family. Published turnaround if the shop states it.`,
+        category: undefined,
+        searchType: "fast",
+        includeDomains: ["controlboardlab.com", "foxon.cz", "foxon.com", "foxon.eu", "bvs-electronics.com"],
+        query: `"${plan.partNumber}" ${family} repair price OR flat rate`,
       },
     ];
   }

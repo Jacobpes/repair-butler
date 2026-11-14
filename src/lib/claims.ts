@@ -224,6 +224,9 @@ function acceptHeadline(
 
 function supportsFact(fact: string, source: Source, plan: PathPlan): boolean {
   const text = sourceText(source);
+  if ((plan.id === "diy" || plan.id === "obsolete") && /[€£$]|\b(?:eur|usd|gbp|sek)\b/i.test(fact)) {
+    return false;
+  }
   if (looksQuantitative(fact) && !numbersAreVerbatim(fact, text)) return false;
   if (/free evaluation/i.test(fact) && !/free evaluation/i.test(text)) return false;
   if (
