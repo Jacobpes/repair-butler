@@ -23,8 +23,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${plex.variable} ${plexMono.variable} h-full antialiased`}>
-      <body className="min-h-full bg-background font-sans text-foreground">{children}</body>
+    <html lang="en" className={`${plex.variable} ${plexMono.variable} h-full antialiased`} suppressHydrationWarning>
+      <body className="min-h-full bg-background font-sans text-foreground">
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('rb-theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}",
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

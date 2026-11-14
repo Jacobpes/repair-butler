@@ -5,9 +5,9 @@ export type Phase = "idle" | "running" | "done" | "error";
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Waiting",
-  running: "Searching",
-  done: "In",
-  error: "Failed",
+  running: "Searching the live web",
+  done: "Result in",
+  error: "Search failed",
 };
 
 export function ProgressRail({
@@ -20,37 +20,42 @@ export function ProgressRail({
   elapsed: number;
 }) {
   return (
-    <section
-      className="rounded-2xl border border-line bg-card p-4 sm:p-5"
-      aria-live="polite"
-    >
+    <section className="rounded-2xl border border-line bg-card p-4 shadow-card sm:p-6" aria-live="polite">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-lg font-medium tracking-tight">Live search</h2>
+        <div>
+          <h2 className="text-lg font-medium tracking-tight">Checking five paths</h2>
+          <p className="mt-1 text-sm text-muted">{message}</p>
+        </div>
         <p className="font-mono text-sm text-muted">{elapsed}s</p>
       </div>
-      <p className="mt-1 text-sm text-muted">{message}</p>
-      <ol className="mt-4 grid gap-2 sm:grid-cols-5">
-        {PATH_META.map((meta) => {
+      <ol className="mt-5">
+        {PATH_META.map((meta, index) => {
           const phase = phases[meta.id];
+          const last = index === PATH_META.length - 1;
           return (
-            <li key={meta.id} className="rounded-xl border border-line bg-paper px-3 py-2">
-              <span className="flex items-center gap-2 text-sm font-medium">
+            <li key={meta.id} className="flex gap-3">
+              <div className="flex flex-col items-center">
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    phase === "running"
-                      ? "animate-pulse bg-amber"
-                      : phase === "done"
-                        ? "bg-pine"
-                        : phase === "error"
-                          ? "bg-danger"
-                          : "bg-line"
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border text-xs font-medium ${
+                    phase === "done"
+                      ? "border-pine bg-pine-soft text-pine"
+                      : phase === "error"
+                        ? "border-danger bg-danger-soft text-danger"
+                        : phase === "running"
+                          ? "border-accent bg-accent-soft text-accent"
+                          : "border-line bg-paper text-muted"
                   }`}
-                />
-                {meta.title}
-              </span>
-              <span className="mt-1 block text-xs text-muted">
-                {phase === "done" ? "Result in" : PHASE_LABEL[phase]}
-              </span>
+                >
+                  {phase === "done" ? "✓" : phase === "error" ? "!" : index + 1}
+                  {phase === "running" ? <span className="sr-only"> searching</span> : null}
+                </span>
+                {last ? null : <span className="my-1 w-px flex-1 bg-line" />}
+              </div>
+              <div className={`min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
+                <p className="text-sm font-medium">{meta.title}</p>
+                <p className="text-sm text-muted">{PHASE_LABEL[phase]}</p>
+                <p className="text-xs text-muted">{meta.summary}</p>
+              </div>
             </li>
           );
         })}

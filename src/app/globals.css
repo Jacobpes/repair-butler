@@ -1,43 +1,51 @@
 @import "tailwindcss";
 
 :root {
-  --background: #efeae1;
-  --foreground: #1c1915;
-  --paper: #f7f3ec;
-  --ink: #1c1915;
-  --muted: #5c564c;
-  --line: #e0d5c6;
-  --copper: #9a4e2c;
-  --copper-deep: #6f3418;
-  --pine: #1d6b48;
-  --pine-soft: #e4f2ea;
-  --amber: #8a4b08;
-  --amber-soft: #f8ecd4;
-  --danger: #8f2d2d;
-  --danger-soft: #f8e4e2;
-  --card: #fffdf9;
+  --background: #f4f5f7;
+  --foreground: #1c2128;
+  --paper: #ffffff;
+  --ink: #1c2128;
+  --muted: #4b5563;
+  --line: #e3e6eb;
+  --accent: #0f4c81;
+  --accent-deep: #0c3c66;
+  --accent-soft: #e7f0f8;
+  --accent-fill: #0f4c81;
+  --on-accent: #ffffff;
+  --copper: #0f4c81;
+  --copper-deep: #0c3c66;
+  --pine: #0d6b45;
+  --pine-soft: #e6f5ee;
+  --amber: #8a5a00;
+  --amber-soft: #fbf3e0;
+  --danger: #9b2c2c;
+  --danger-soft: #fdecec;
+  --card: #ffffff;
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #12100e;
-    --foreground: #f4efe7;
-    --paper: #1a1714;
-    --ink: #f4efe7;
-    --muted: #c4b8a8;
-    --line: #3a332c;
-    --copper: #f0b08a;
-    --copper-deep: #e08a62;
-    --pine: #9ed7b8;
-    --pine-soft: #1a2e24;
-    --amber: #f0c27a;
-    --amber-soft: #332816;
-    --danger: #f0b0aa;
-    --danger-soft: #3a2220;
-    --card: #221e1a;
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --background: #101318;
+  --foreground: #e8eaed;
+  --paper: #181c22;
+  --ink: #e8eaed;
+  --muted: #b7c0ca;
+  --line: #2c333d;
+  --accent: #8eb8e5;
+  --accent-deep: #c5dcf4;
+  --accent-soft: #1c2c3e;
+  --accent-fill: #8eb8e5;
+  --on-accent: #101318;
+  --copper: #8eb8e5;
+  --copper-deep: #c5dcf4;
+  --pine: #8ed4b0;
+  --pine-soft: #163026;
+  --amber: #f0c56a;
+  --amber-soft: #332816;
+  --danger: #f0b0aa;
+  --danger-soft: #3a2220;
+  --card: #1c2128;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -47,6 +55,11 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fill: var(--accent-fill);
+  --color-on-accent: var(--on-accent);
   --color-copper: var(--copper);
   --color-copper-deep: var(--copper-deep);
   --color-pine: var(--pine);
@@ -58,6 +71,7 @@
   --color-card: var(--card);
   --font-sans: var(--font-plex);
   --font-mono: var(--font-plex-mono);
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 28px rgb(16 24 40 / 0.06);
 }
 
 body {
@@ -66,7 +80,12 @@ body {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--copper) 35%, white);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

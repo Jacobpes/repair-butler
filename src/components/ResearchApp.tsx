@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApprovalPanel } from "@/components/ApprovalPanel";
 import { intakeFromExample, IntakeForm, toIntake, type FormValue } from "@/components/IntakeForm";
-import { OptionCard, PendingCard, RecommendationBanner } from "@/components/OptionCard";
+import { IconMoon, IconSun } from "@/components/icons";
+import { Comparison, RecommendationBanner } from "@/components/OptionCard";
 import { ProgressRail, type Phase } from "@/components/ProgressRail";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { parseFreeText } from "@/lib/freetext";
@@ -218,41 +219,46 @@ export function ResearchApp() {
   const selectedCard = cards.find((card) => card.id === selected) ?? null;
   const intake = toIntake(form);
 
+  const recommendedCard = cards.find((card) => card.id === recommendation?.pathId) ?? null;
+
   return (
     <div className="min-h-full">
+      <a
+        href="#search"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-card focus:px-3 focus:py-2"
+      >
+        Skip to search
+      </a>
       <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-md bg-ink font-mono text-xs font-medium text-paper">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent-fill font-mono text-xs font-medium text-on-accent">
               RB
             </span>
             <div>
               <p className="font-medium leading-none tracking-tight">Repair Butler</p>
-              <p className="mt-1 text-xs text-muted">Industrial electronics, sourced</p>
+              <p className="mt-1 text-xs text-muted">Sourced decisions for the workshop</p>
             </div>
           </div>
-          <p className="hidden text-right text-xs text-muted sm:block">
-            Junction 2026 · Exa Internet Butler
-          </p>
+          <ThemeToggle />
         </div>
       </header>
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
         <section>
-          <p className="font-mono text-xs uppercase tracking-[0.16em] text-copper">
-            For maintenance technicians and small repair shops
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-accent">
+            For maintenance technicians
           </p>
           <h1 className="mt-2 max-w-3xl text-3xl font-medium tracking-tight sm:text-4xl">
-            Every way to get a dead unit running again.
+            Find a sourced next step for a dead industrial unit.
           </h1>
           <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted">
-            Describe the manufacturer, part number, and symptom. Repair Butler searches the live
-            web for a DIY fix, a repair shop, a used unit, a new one, and a successor. You approve
-            the next step. Every price, lead time, and failure mode has a source, or it says not
-            found.
+            Paste the fault. Five live searches compare a DIY fix, a repair shop, a used unit, a new
+            unit, and a successor. Every price and lead time links to the page it came from.
           </p>
         </section>
 
+        <div id="search">
         <IntakeForm
           value={form}
           onChange={setForm}
@@ -271,6 +277,7 @@ export function ResearchApp() {
             if (next) void start(next);
           }}
         />
+        </div>
 
         {error ? (
           <p role="alert" className="rounded-xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger">
@@ -278,38 +285,22 @@ export function ResearchApp() {
           </p>
         ) : null}
 
-        {showBoard ? <ProgressRail phases={phases} message={message} elapsed={elapsed} /> : null}
+        {running ? <ProgressRail phases={phases} message={message} elapsed={elapsed} /> : null}
 
-        {recommendation ? <RecommendationBanner recommendation={recommendation} /> : null}
+        {recommendation ? <RecommendationBanner recommendation={recommendation} card={recommendedCard} /> : null}
+
+        {showBoard && !running ? (
+          <p className="text-sm text-muted">Checked five paths in {elapsed}s.</p>
+        ) : null}
 
         {showBoard ? (
-          <section className="grid gap-4 lg:grid-cols-2">
-            {PATH_META.map((meta, index) => {
-              const card = ordered[index];
-              const wide = index === PATH_META.length - 1;
-              if (!card) {
-                return (
-                  <div key={meta.id} className={wide ? "lg:col-span-2" : undefined}>
-                    <PendingCard title={meta.title} summary={meta.summary} waiting={running} />
-                  </div>
-                );
-              }
-              return (
-                <div key={meta.id} className={wide ? "lg:col-span-2" : undefined}>
-                  <OptionCard
-                    card={card}
-                    recommended={recommendation?.pathId === card.id}
-                    fastest={
-                      recommendation?.fastestPathId === card.id &&
-                      recommendation.fastestPathId !== recommendation.pathId
-                    }
-                    selected={selected === card.id}
-                    onSelect={() => setSelected(card.id)}
-                  />
-                </div>
-              );
-            })}
-          </section>
+          <Comparison
+            cards={ordered}
+            running={running}
+            recommendation={recommendation}
+            selected={selected}
+            onSelect={setSelected}
+          />
         ) : null}
 
         {selectedCard ? <ApprovalPanel card={selectedCard} intake={intake} /> : null}
@@ -331,3 +322,37 @@ export function ResearchApp() {
     </div>
   );
 }
+
+function subscribeTheme(onStoreChange: () => void) {
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+function ThemeToggle() {
+  const dark = useSyncExternalStore(
+    subscribeTheme,
+    () => document.documentElement.dataset.theme === "dark",
+    () => false,
+  );
+
+  function toggle() {
+    const next = dark ? "light" : "dark";
+    if (next === "dark") document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    localStorage.setItem("rb-theme", next);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={dark}
+      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-sm font-medium"
+    >
+      {dark ? <IconSun /> : <IconMoon />}
+      {dark ? "Light mode" : "Dark mode"}
+    </button>
+  );
+}
+

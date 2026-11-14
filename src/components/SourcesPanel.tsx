@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { hostOf } from "@/components/citations";
+import { IconCheck, IconCopy } from "@/components/icons";
 import { PATH_META } from "@/lib/paths";
 import type { PathCard, Recommendation, Source } from "@/lib/types";
 import { formatDate } from "@/lib/text";
@@ -24,17 +26,15 @@ export function SourcesPanel({
     })),
   ];
   const text = groups
-    .flatMap((group) =>
-      group.sources.map((source) => `${group.title}\t${source.title}\t${source.url}`),
-    )
+    .flatMap((group) => group.sources.map((source, index) => `${group.title}\t${index + 1}\t${source.title}\t${source.url}`))
     .join("\n");
 
   return (
-    <section className="rounded-2xl border border-line bg-card p-4 sm:p-6">
+    <section className="rounded-2xl border border-line bg-card p-4 shadow-card sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium tracking-tight">Sources</h2>
-          <p className="mt-1 text-sm text-muted">Every URL this run used, grouped by path.</p>
+          <h2 className="text-lg font-medium tracking-tight">All sources</h2>
+          <p className="mt-1 text-sm text-muted">Every URL from this search, grouped by path.</p>
         </div>
         <button
           type="button"
@@ -45,8 +45,9 @@ export function SourcesPanel({
               window.setTimeout(() => setCopied(false), 2000);
             });
           }}
-          className="rounded-lg border border-line px-3 py-2 text-sm font-medium disabled:opacity-50"
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium disabled:opacity-50"
         >
+          {copied ? <IconCheck /> : <IconCopy />}
           {copied ? "Copied" : "Copy source list"}
         </button>
       </div>
@@ -57,11 +58,11 @@ export function SourcesPanel({
             {group.sources.length === 0 ? (
               <p className="mt-2 text-sm text-muted">No pages returned.</p>
             ) : (
-              <ul className="mt-2 space-y-3">
-                {group.sources.map((source) => (
-                  <SourceRow key={`${group.id}-${source.url}`} source={source} />
+              <ol className="mt-2 space-y-3">
+                {group.sources.map((source, index) => (
+                  <SourceRow key={`${group.id}-${source.url}`} source={source} index={index + 1} />
                 ))}
-              </ul>
+              </ol>
             )}
           </div>
         ))}
@@ -70,27 +71,22 @@ export function SourcesPanel({
   );
 }
 
-function SourceRow({ source }: { source: Source }) {
-  let host = source.url;
-  try {
-    host = new URL(source.url).host.replace(/^www\./, "");
-  } catch {
-    host = source.url;
-  }
+function SourceRow({ source, index }: { source: Source; index: number }) {
+  const host = hostOf(source.url);
   return (
     <li className="rounded-xl border border-line bg-paper px-3 py-3">
-      <a
-        href={source.url}
-        target="_blank"
-        rel="noreferrer"
-        className="font-medium text-copper underline-offset-2 hover:underline"
-      >
-        {source.title}
-      </a>
-      <p className="mt-1 font-mono text-xs text-muted">
-        {host}
-        {source.publishedDate ? ` · ${formatDate(source.publishedDate)}` : ""}
-      </p>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 font-mono text-xs text-accent">{index}</span>
+        <div className="min-w-0">
+          <a href={source.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+            {source.title}
+          </a>
+          <p className="mt-1 font-mono text-xs text-muted">
+            {host}
+            {source.publishedDate ? ` · ${formatDate(source.publishedDate)}` : ""}
+          </p>
+        </div>
+      </div>
       {source.highlight ? (
         <blockquote className="mt-2 text-sm leading-relaxed">
           <span className="mr-1 text-xs text-muted">
