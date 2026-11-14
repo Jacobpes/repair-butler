@@ -1,7 +1,9 @@
 import {
+  conflictsWithPart,
   familyTerms,
   mentionsPart,
   mentionsTerm,
+  nearerSibling,
   symptomHits,
   urlMentionsPart,
 } from "@/lib/part";
@@ -107,7 +109,7 @@ const LEAD_RES = [
   /\b\d+\s+(?:business\s+)?(?:days?|weeks?)\b/i,
 ];
 
-type Condition = "new" | "used" | "refurbished" | "repair";
+type Condition = "new" | "used" | "refurbished" | "repair" | "listed";
 
 type Offer = {
   verbatim: string;
@@ -150,7 +152,8 @@ export function filterHits(plan: PathPlan, hits: RawHit[] | undefined): RawHit[]
     if (isNewsUrl(hit.url) && plan.id !== "obsolete") return [];
     const staleAfter = STALE_MONTHS[plan.id];
     if (staleAfter && isStale(hit.publishedDate, plan.asOf, staleAfter)) return [];
-    if (!matchesPath(plan, blob, hit.url)) return [];
+    const compared = plan.id === "used" || plan.id === "new" ? listingBlob(hit) : blob;
+    if (!matchesPath(plan, compared, hit.url)) return [];
     if (plan.id === "obsolete" && isNewsUrl(hit.url) && !SUCCESSOR.test(blob)) return [];
     return [orderHighlights(hit, plan)];
   });
@@ -191,7 +194,7 @@ export function commercialFacts(
   }
   if (!chosen) {
     const pageLead = eligible
-      .map((source) => ({ source, lead: firstLead(sourceText(source)) }))
+      .map((source) => ({ source, lead: firstLead(sourceText(source), plan.id) }))
       .find((item) => item.lead);
     if (pageLead?.lead) {
       leadTime = pageLead.lead;
@@ -228,10 +231,11 @@ export function sourcedLeadDays(lead: string): number | null {
 }
 
 function matchesPath(plan: PathPlan, blob: string, url: string): boolean {
+  if (conflictsWithPart(`${blob} ${url}`, plan.partNumber)) return false;
   if (plan.id === "repair") return repairRelevant(blob, url, plan);
   if (plan.id === "diy") return diyRelevant(blob, url, plan);
   if (plan.id === "obsolete") return successorRelevant(blob, url, plan);
-  if (isRepairHost(url)) return false;
+  if (isRepairHost(url) || isRepairServiceText(url, blob)) return false;
   return mentionsPart(blob, plan.partNumber) || urlMentionsPart(url, plan.partNumber);
 }
 
@@ -244,7 +248,7 @@ function namedProduct(blob: string, url: string, plan: PathPlan): boolean {
 }
 
 function diyRelevant(blob: string, url: string, plan: PathPlan): boolean {
-  if (isShopHost(url) || isRepairHost(url)) return false;
+  if (isShopHost(url) || isRepairHost(url) || isRepairServiceText(url, blob)) return false;
   if (mentionsPart(blob, plan.partNumber) || urlMentionsPart(url, plan.partNumber)) return true;
   if (!plan.familyTerms.some((term) => mentionsTerm(blob, term))) return false;
   return symptomHits(blob, plan.symptom);
@@ -271,8 +275,12 @@ function quoteNames(text: string, url: string, plan: PathPlan): boolean {
   return plan.familyTerms.some((term) => mentionsTerm(text, term));
 }
 
+function listingBlob(hit: RawHit): string {
+  return `${hit.title ?? ""} ${(hit.highlights ?? []).join(" ")}`;
+}
+
 function matchBlob(hit: RawHit): string {
-  return `${hit.title ?? ""} ${(hit.highlights ?? []).join(" ")} ${hit.text ?? ""}`;
+  return `${listingBlob(hit)} ${hit.text ?? ""}`;
 }
 
 function orderHighlights(hit: RawHit, plan: PathPlan): RawHit {
@@ -311,8 +319,12 @@ function offersFrom(text: string, source: Source, plan: PathPlan): Offer[] {
     const amount = parseAmount(price.verbatim);
     if (amount === null) return [];
     const next = prices[index + 1]?.index ?? text.length;
-    const start = Math.max(0, price.index - 160);
+    const start = Math.max(0, price.index - 180);
     const window = text.slice(start, next);
+    const before = text.slice(Math.max(0, price.index - 28), price.index);
+    if (/\b(save|discount)\b/i.test(before) && !/\bprice\b/i.test(before)) return [];
+    if (nearerSibling(window, plan.partNumber, price.index - start)) return [];
+    if (!offerAnchored(window, source.url, plan)) return [];
     const currency = currencyOf(price.verbatim);
     return [
       {
@@ -323,10 +335,35 @@ function offersFrom(text: string, source: Source, plan: PathPlan): Offer[] {
         source,
         eu: offerIsEu(source.url, currency),
         condition: conditionNear(window, plan.id, price.index - start),
-        lead: firstLead(window),
+        lead: firstLead(window, plan.id),
       },
     ];
   });
+}
+
+function repairPriceLanguage(text: string): boolean {
+  return /\b(flat[-\s]?rate|repair price|repair cost|to repair|for repair|cost of repair)\b/i.test(text);
+}
+
+function saleLanguage(text: string): boolean {
+  return /\b(for sale|add to cart|buy now|in stock|excl\.?\s*vat|purchase|sales)\b/i.test(text);
+}
+
+function offerAnchored(window: string, url: string, plan: PathPlan): boolean {
+  if (conflictsWithPart(window, plan.partNumber) && !mentionsPart(window, plan.partNumber)) return false;
+  if ((plan.id === "used" || plan.id === "new") && /\b(for repair|repair price|send it to us|product overhaul)\b/i.test(window)) {
+    return false;
+  }
+  if (plan.id === "repair" && /\breplacement\b|\bsealed surplus\b/i.test(window)) return false;
+  if (plan.id === "repair" && !repairPriceLanguage(window) && (saleLanguage(window) || !isRepairHost(url))) {
+    return false;
+  }
+  if (/\btypical repairs?\b|\bmost modules\b/i.test(window) && !mentionsPart(window, plan.partNumber)) {
+    return false;
+  }
+  if (mentionsPart(window, plan.partNumber) || urlMentionsPart(url, plan.partNumber)) return true;
+  if (plan.id === "used" || plan.id === "new") return false;
+  return plan.familyTerms.some((term) => mentionsTerm(window, term));
 }
 
 function chooseOffer(offers: Offer[], country: string, pathId: PathPlan["id"]): Offer | null {
@@ -347,7 +384,16 @@ function chooseOffer(offers: Offer[], country: string, pathId: PathPlan["id"]): 
     const eu = pool.filter((offer) => offer.eu);
     if (eu.length > 0) pool = eu;
   }
-  return [...pool].sort((left, right) => eurValue(left) - eurValue(right))[0] ?? null;
+  return [...dropOutliers(pool)].sort((left, right) => eurValue(left) - eurValue(right))[0] ?? null;
+}
+
+function dropOutliers(offers: Offer[]): Offer[] {
+  if (offers.length < 2) return offers;
+  const values = offers.map(eurValue).sort((left, right) => left - right);
+  const mid = values[Math.floor(values.length / 2)] ?? 0;
+  if (mid < 80) return offers;
+  const kept = offers.filter((offer) => eurValue(offer) >= mid * 0.25);
+  return kept.length > 0 ? kept : offers;
 }
 
 function eurValue(offer: Offer): number {
@@ -356,7 +402,7 @@ function eurValue(offer: Offer): number {
 }
 
 function formatOffer(offer: Offer, country: string): string {
-  let body = offer.verbatim;
+  let body = tidyPrice(offer.verbatim);
   if (offer.quantity !== null && offer.quantity > 1) {
     body = `${offer.verbatim} for ${offer.quantity} pcs`;
   }
@@ -389,7 +435,7 @@ function findModelPhrase(
       source,
       eu: offerIsEu(source.url, currencyOf(verbatim)),
       condition: conditionNear(text, plan.id, index),
-      lead: firstLead(text),
+      lead: firstLead(text, plan.id),
     };
     if (offer.quantity !== null && offer.quantity > 1) continue;
     const display =
@@ -407,10 +453,14 @@ function sourcesContaining(sources: Source[], needle: string): Source[] {
   return sources.filter((source) => sourceText(source).toLowerCase().includes(clean.toLowerCase()));
 }
 
-function firstLead(text: string): string | null {
+function firstLead(text: string, pathId?: PathPlan["id"]): string | null {
   for (const expression of LEAD_RES) {
     const match = expression.exec(text);
-    if (match) return match[0];
+    if (!match) continue;
+    if (pathId === "repair" && /\bstock\b|ships?\s+today|ready to ship/i.test(match[0])) continue;
+    const stockCount = Number.parseInt(match[0], 10);
+    if (/\bin stock\b/i.test(match[0]) && Number.isFinite(stockCount) && stockCount > 500) continue;
+    return match[0];
   }
   return null;
 }
@@ -466,7 +516,7 @@ function currencyOf(verbatim: string): Currency | null {
   if (/€|\bEUR\b/i.test(verbatim)) return "EUR";
   if (/\$|\bUSD\b/i.test(verbatim)) return "USD";
   if (/£|\bGBP\b/i.test(verbatim)) return "GBP";
-  if (/\bSEK\b/i.test(verbatim)) return "SEK";
+  if (/\bSEK\b|\bkr\b/i.test(verbatim)) return "SEK";
   if (/\bNOK\b/i.test(verbatim)) return "NOK";
   if (/\bDKK\b/i.test(verbatim)) return "DKK";
   if (/\bPLN\b/i.test(verbatim)) return "PLN";
@@ -475,20 +525,28 @@ function currencyOf(verbatim: string): Currency | null {
 
 function conditionNear(text: string, pathId: PathPlan["id"], priceAt: number): Condition {
   if (pathId === "repair") return "repair";
-  const explicit = /condition\s*[:\-]\s*(refurbished|refurb|reconditioned|new|used)/i.exec(text);
+  const earlier = findPrices(text.slice(0, priceAt)).at(-1);
+  const start = earlier ? earlier.index + earlier.verbatim.length : Math.max(0, priceAt - 60);
+  const slice = text.slice(start, priceAt + 16);
+  const localAt = priceAt - start;
+  const explicit = /condition\s*[:\-]\s*(refurbished|refurb|reconditioned|remanufactured|new|used)/i.exec(slice);
   if (explicit?.[1]) return mapCondition(explicit[1]);
+  const cleaned = slice.replace(/\bnever\s+used\b/gi, "unused").replace(/\bused\s+(?:in|for|with|on|as|to|by)\b/gi, " ");
   const words = [
-    ...text.matchAll(
+    ...cleaned.matchAll(
       /\b(refurbished|reconditioned|remanufactured|rebuilt|factory[-\s]?sealed|brand new|unused|new|used|second[-\s]?hand|pre-owned|surplus)\b/gi,
     ),
   ];
   const specific = words.filter((word) => !/^surplus$/i.test(word[1] ?? ""));
   const pool = specific.length > 0 ? specific : words;
-  if (pool.length === 0) return pathId === "used" ? "used" : "new";
+  if (pool.length === 0) {
+    if (/\bsurplus\b/i.test(text)) return "listed";
+    return pathId === "used" ? "listed" : "new";
+  }
   let closest = pool[0];
   let distance = Number.POSITIVE_INFINITY;
   for (const word of pool) {
-    const at = Math.abs((word.index ?? 0) - priceAt);
+    const at = Math.abs((word.index ?? 0) - localAt);
     if (at < distance) {
       distance = at;
       closest = word;
@@ -499,6 +557,7 @@ function conditionNear(text: string, pathId: PathPlan["id"], priceAt: number): C
 
 function mapCondition(word: string): Condition {
   if (/refurb|recondition|remanufactur|rebuilt/i.test(word)) return "refurbished";
+  if (/surplus/i.test(word)) return "listed";
   if (/new|sealed|unused/i.test(word)) return "new";
   return "used";
 }
@@ -507,6 +566,7 @@ function conditionLabel(condition: Condition): string {
   if (condition === "new") return "New";
   if (condition === "used") return "Used";
   if (condition === "refurbished") return "Refurbished";
+  if (condition === "listed") return "Listed";
   return "Repair service";
 }
 
@@ -529,15 +589,26 @@ function isRepairHost(url: string): boolean {
   return hostIs(url, REPAIR_HOSTS);
 }
 
+const MONEY_NUMBER =
+  "(?:\\d{1,3}(?:[ \\u00a0]\\d{3})+(?:[.,]\\d{2})?|\\d{1,3}(?:\\.\\d{3})+(?:,\\d{2})?|\\d{1,3}(?:,\\d{3})+(?:\\.\\d{2})?|\\d+(?:[ \\u00a0]*[.,][ \\u00a0]*\\d{2})?)";
+
+function tidyPrice(verbatim: string): string {
+  return verbatim
+    .replace(/\s+/g, " ")
+    .replace(/\s*([.,])\s*(?=\d{2}\b)/g, "$1")
+    .trim();
+}
+
 function findPrices(text: string): { verbatim: string; index: number }[] {
   const found: { verbatim: string; index: number }[] = [];
   const occupied: [number, number][] = [];
-  const prefix = /(?:USD|EUR|GBP|SEK|NOK|DKK|PLN)\s+|[€£$]\s?/gi;
+  const prefix = new RegExp(`(?:USD|EUR|GBP|SEK|NOK|DKK|PLN)\\s+|[€£$]\\s?`, "gi");
+  const numberAtStart = new RegExp(`^${MONEY_NUMBER}`);
   let match: RegExpExecArray | null;
   while ((match = prefix.exec(text))) {
     const start = match.index;
     const rest = text.slice(start + match[0].length);
-    const number = /^(?:\d{1,3}(?:[,\u00a0]\d{3})+|\d+)(?:[.,]\d{2})?/.exec(rest);
+    const number = numberAtStart.exec(rest);
     if (!number) continue;
     const end = start + match[0].length + number[0].length;
     if (/\d/.test(text[end] ?? "")) continue;
@@ -545,8 +616,10 @@ function findPrices(text: string): { verbatim: string; index: number }[] {
     occupied.push([start, end]);
     prefix.lastIndex = end;
   }
-  const suffix =
-    /\b(?:\d{1,3}(?:[ \u00a0.]\d{3})+|\d+)(?:[.,]\d{2})?\s?(?:EUR|USD|GBP|SEK|NOK|DKK|PLN|€|£|\$)\b/gi;
+  const suffix = new RegExp(
+    `\\b${MONEY_NUMBER}\\s?(?:EUR|USD|GBP|SEK|NOK|DKK|PLN|kr|€|£|\\$)\\b`,
+    "gi",
+  );
   while ((match = suffix.exec(text))) {
     const start = match.index;
     const end = start + match[0].length;
@@ -567,6 +640,7 @@ export function sourceMatchesIntake(
     partNumber: intake.partNumber,
     symptom: intake.symptom,
   });
+  if (conflictsWithPart(text, intake.partNumber)) return false;
   if (mentionsPart(text, intake.partNumber) || urlMentionsPart(source.url, intake.partNumber)) return true;
   if (families.some((term) => mentionsTerm(text, term))) return true;
   return mentionsTerm(text, intake.manufacturer) && symptomHits(text, intake.symptom);
@@ -597,15 +671,23 @@ export function rehomeRepairHits(plans: PathPlan[], raws: Map<PathPlan["id"], Ra
   }
 }
 
+function isRepairServiceText(url: string, blob: string): boolean {
+  if (/forum|reddit\.|stackexchange|\/posts\/|manual|literature\.|\.pdf(?:$|\?)/i.test(url)) return false;
+  if (isRepairHost(url)) return true;
+  if (/\bhow to\b|\bprocedure\b|\breplace the\b/i.test(blob) && !/\brepair service\b/i.test(blob)) {
+    return false;
+  }
+  return /\b(repair service|we repair|flat[-\s]?rate|free evaluation|product overhaul|send[-\s]?in|no-fix,\s*no-fee|servisujeme)\b|维修|修理/i.test(
+    blob,
+  );
+}
+
 function isRepairOffer(hit: RawHit, plan: PathPlan): boolean {
   if (!hit.url) return false;
   const blob = matchBlob(hit);
   const named = namedProduct(blob, hit.url, plan) || mentionsTerm(blob, plan.manufacturer);
-  if (!named) return false;
-  if (isRepairHost(hit.url)) return true;
-  const offer = /\b(flat[-\s]?rate|repair price|repair service|we repair|send[-\s]?in)\b/i.test(blob);
-  const priced = /[€£$]\s?\d|\b(?:EUR|USD|GBP)\s?\d/i.test(blob);
-  return offer && priced;
+  if (!named || conflictsWithPart(`${blob} ${hit.url}`, plan.partNumber)) return false;
+  return isRepairServiceText(hit.url, `${hit.title ?? ""} ${hit.url} ${blob}`);
 }
 
 function formatGrouped(value: number): string {

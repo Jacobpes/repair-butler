@@ -169,20 +169,26 @@ export function recommendationFromAnswer(
     reason =
       "Exa Answer included figures without citations, so those figures are withheld. Use the sourced numbers on the cards.";
   }
-  if (!pathId || !cards.some((card) => card.id === pathId)) {
+  const successor = cards.find((card) => card.id === "obsolete");
+  const noted =
+    /\b(obsolete|discontinued)\b/i.test(reason) && (!successor || successor.sources.length === 0)
+      ? ["No discontinuation notice was found in the successor search.", ...caveats]
+      : caveats;
+  const chosen = pathId ? cards.find((card) => card.id === pathId) : undefined;
+  if (!pathId || !chosen || chosen.status === "error") {
     const fallback = fallbackRecommendation(
       intake,
       cards,
-      "Exa Answer did not name one of the five paths.",
+      "Exa Answer did not name a path that returned sources.",
     );
-    return { ...fallback, caveats: [...caveats, ...fallback.caveats].slice(0, 4) };
+    return { ...fallback, caveats: [...noted, ...fallback.caveats].slice(0, 4) };
   }
 
   return withFastest(intake, cards, {
     pathId,
     reason,
     urgencyNote,
-    caveats,
+    caveats: noted.slice(0, 4),
     sources: relevantCitations.slice(0, 6),
     via: "exa-answer",
     fastestPathId: null,

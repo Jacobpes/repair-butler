@@ -11,7 +11,17 @@ export const PATH_META = [
 ] as const;
 
 export const EXTRACTION_PROMPT =
-  'Extract only facts the results state about this exact part number. Copy any price, stock count, or lead time character for character. Never convert currency, never multiply a pack price into a unit price, and never invent a figure. If a fact is missing, write exactly "not found" for text fields and use an empty list for arrays. Ignore a page that does not show this exact part number.';
+  'Extract only facts the results state about this exact part number. Copy any price, stock count, or lead time character for character, including every digit and the decimal. Never convert currency, never multiply a pack price into a unit price, and never invent a figure. If a fact is missing, write exactly "not found" for text fields and use an empty list for arrays. Ignore a page that does not show this exact part number.';
+
+export function extractionPrompt(id: PathPlan["id"]): string {
+  if (id === "diy" || id === "obsolete") {
+    return 'Extract only facts the pages state about this part, or about its family when the symptom matches. Copy numbers character for character. Never invent a price, stock count, or lead time. If a fact is missing, write exactly "not found" for text fields and use an empty list for arrays. A repair-shop price list is not a failure note.';
+  }
+  if (id === "repair") {
+    return 'Extract only repair-service facts tied to this exact part. Copy a flat rate or turnaround character for character. Do not use a generic module price range for this unit. If a fact is missing, write exactly "not found" for text fields and use an empty list for arrays.';
+  }
+  return EXTRACTION_PROMPT;
+}
 
 export const HIGHLIGHT_QUERY =
   "exact part number, price, stock, lead time, turnaround, failure mode, condition, discontinued, successor";
@@ -179,14 +189,38 @@ export function buildPathPlans(intake: Intake, now = new Date()): PathPlan[] {
 
 export function extraSearches(plan: PathPlan): PathPlan[] {
   if (plan.id === "used") {
-    return partNumberVariants(plan.partNumber).slice(0, 2).map((variant) => ({
+    const surplus = partNumberVariants(plan.partNumber).slice(0, 2).map((variant) => ({
       ...plan,
-      numResults: 15,
+      numResults: 12,
       userLocation: undefined,
       includeDomains: SURPLUS_DOMAINS,
       startPublishedDate: undefined,
       query: `"${variant}" (used OR refurbished OR surplus) price stock condition site product`,
     }));
+    return [
+      ...surplus,
+      {
+        ...plan,
+        numResults: 12,
+        userLocation: undefined,
+        includeDomains: undefined,
+        excludeDomains: SOCIAL,
+        startPublishedDate: undefined,
+        query: `"${plan.partNumber}" (used OR refurbished OR surplus) (price OR EUR OR USD OR GBP OR stock)`,
+      },
+    ];
+  }
+  if (plan.id === "obsolete") {
+    const family = plan.familyTerms.slice(0, 2).join(" ");
+    return [
+      {
+        ...plan,
+        searchType: "fast",
+        additionalQueries: undefined,
+        numResults: 6,
+        query: `"${plan.partNumber}" ${family} discontinued OR successor OR "end of life" OR replacement`,
+      },
+    ];
   }
   if (plan.id === "repair") {
     const family = plan.familyTerms.join(" ");

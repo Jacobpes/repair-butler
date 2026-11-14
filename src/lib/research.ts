@@ -6,7 +6,7 @@ import {
 } from "@/lib/answer";
 import { buildCard, mergeHitsIntoRaw } from "@/lib/claims";
 import { rehomeRepairHits } from "@/lib/evidence";
-import { EXTRACTION_PROMPT, HIGHLIGHT_QUERY, buildPathPlans, extraSearches } from "@/lib/paths";
+import { HIGHLIGHT_QUERY, buildPathPlans, extraSearches, extractionPrompt } from "@/lib/paths";
 import type { Intake, PathCard, PathPlan, RawHit, RawSearch, Source } from "@/lib/types";
 import { normalizeUrl, siteHost } from "@/lib/text";
 
@@ -222,14 +222,45 @@ function dedupeHits(hits: RawHit[]): RawHit[] {
   return unique;
 }
 
+let nextSlot = 0;
+
+function pace(): Promise<void> {
+  const gap = 140;
+  const now = Date.now();
+  const at = Math.max(now, nextSlot);
+  nextSlot = at + gap;
+  const wait = at - now;
+  if (wait <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, wait));
+}
+
+function retriable(error: unknown): boolean {
+  return error instanceof ExaError && (error.statusCode === 429 || error.statusCode >= 500);
+}
+
+async function withExaRetry<T>(run: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await pace();
+      return await run();
+    } catch (error) {
+      last = error;
+      if (!retriable(error) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1_200 * (attempt + 1)));
+    }
+  }
+  throw last;
+}
+
 async function searchPlan(exa: Exa, plan: PathPlan, signal: AbortSignal) {
-  const timeout = plan.searchType === "deep" ? 24_000 : plan.searchType === "fast" ? 16_000 : 18_000;
+  const timeout = plan.searchType === "deep" ? 22_000 : plan.searchType === "fast" ? 14_000 : 16_000;
   const request = { signal, timeout };
   const contents = { highlights: { query: HIGHLIGHT_QUERY } };
   const common = {
     numResults: plan.numResults,
     contents,
-    systemPrompt: EXTRACTION_PROMPT,
+    systemPrompt: extractionPrompt(plan.id),
     objective: plan.objective,
     outputSchema: PATH_OUTPUT_SCHEMA,
     ...(plan.userLocation ? { userLocation: plan.userLocation } : {}),
@@ -239,19 +270,19 @@ async function searchPlan(exa: Exa, plan: PathPlan, signal: AbortSignal) {
     ...(plan.category ? { category: plan.category } : {}),
   };
 
-  if (plan.searchType === "deep") {
-    return exa.search(
-      plan.query,
-      {
-        type: "deep",
-        additionalQueries: plan.additionalQueries,
-        ...common,
-      },
-      request,
-    );
-  }
-
-  return exa.search(plan.query, { type: plan.searchType, ...common }, request);
+  return withExaRetry(() =>
+    plan.searchType === "deep"
+      ? exa.search(
+          plan.query,
+          {
+            type: "deep",
+            additionalQueries: plan.additionalQueries,
+            ...common,
+          },
+          request,
+        )
+      : exa.search(plan.query, { type: plan.searchType, ...common }, request),
+  );
 }
 
 function toRaw(response: {
@@ -281,22 +312,29 @@ async function enrichWithContents(
 ): Promise<PathCard[]> {
   const urls = [
     ...new Set(
-      cards.flatMap((card) => (card.sources[0]?.url ? [card.sources[0].url] : [])),
+      cards.flatMap((card) => {
+        const priced = card.claims.find(
+          (claim) => claim.label === "Estimated cost" && claim.sources[0]?.url,
+        )?.sources[0]?.url;
+        return [priced, card.sources[0]?.url].filter((url): url is string => Boolean(url));
+      }),
     ),
-  ].slice(0, 5);
+  ].slice(0, 8);
   if (urls.length === 0) return cards;
 
-  const response = await exa.getContents(
-    urls,
-    {
-      text: { maxCharacters: 1200 },
-      highlights: { query: HIGHLIGHT_QUERY },
-      summary: {
-        query:
-          "What does this page state about price, stock, lead time, failure mode, condition, or a replacement? If it does not say, say so.",
+  const response = await withExaRetry(() =>
+    exa.getContents(
+      urls,
+      {
+        text: { maxCharacters: 1500 },
+        highlights: { query: HIGHLIGHT_QUERY },
+        summary: {
+          query:
+            "What does this page state about price, stock, lead time, failure mode, condition, or a replacement for this exact part? If it does not say, say so.",
+        },
       },
-    },
-    { signal, timeout: 10_000 },
+      { signal, timeout: 8_000 },
+    ),
   );
 
   const hits: RawHit[] = response.results.map((result) => ({
@@ -321,15 +359,17 @@ async function enrichWithContents(
 }
 
 async function recommend(exa: Exa, intake: Intake, cards: PathCard[], signal: AbortSignal) {
-  const response = await exa.answer(
-    buildAnswerPrompt(intake, cards),
-    {
-      outputSchema: ANSWER_SCHEMA,
-      systemPrompt:
-        "Recommend one path for the technician. Never introduce a price, stock level, or lead time that is not in the sourced findings.",
-      userLocation: intake.country,
-    },
-    { signal, timeout: 12_000 },
+  const response = await withExaRetry(() =>
+    exa.answer(
+      buildAnswerPrompt(intake, cards),
+      {
+        outputSchema: ANSWER_SCHEMA,
+        systemPrompt:
+          "Recommend one path for the technician using only the sourced findings. Cite only pages from that list. Never introduce a price, stock level, lead time, or discontinuation that is not written there.",
+        userLocation: intake.country,
+      },
+      { signal, timeout: 9_000 },
+    ),
   );
   const citations: Source[] = response.citations.map((citation) => ({
     url: citation.url,

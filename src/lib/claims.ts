@@ -86,14 +86,26 @@ export function dedupeSources(sources: Source[]): Source[] {
   return unique;
 }
 
+function hasPrice(text: string): boolean {
+  return /[€£$]|\b(?:EUR|USD|GBP|SEK|NOK|DKK|PLN)\b/i.test(text);
+}
+
+export function mergeHighlights(previous?: string[], incoming?: string[]): string[] | undefined {
+  const next = (incoming ?? []).map((item) => item.trim()).filter(Boolean);
+  const prev = (previous ?? []).map((item) => item.trim()).filter(Boolean);
+  if (next.length === 0) return prev.length ? prev : undefined;
+  const kept = next.some(hasPrice) ? next : [...prev.filter(hasPrice), ...next];
+  return kept.length ? kept : undefined;
+}
+
 export function sourcesFromHits(hits: RawHit[] | undefined): Source[] {
   const sources: Source[] = [];
   for (const hit of hits ?? []) {
     if (!hit.url) continue;
     const highlights = (hit.highlights ?? []).map((item) => item.trim()).filter(Boolean);
-    const highlight = highlights.length
-      ? clip(highlights.slice(0, 2).join(" "), 420)
-      : undefined;
+    const priced = highlights.filter(hasPrice);
+    const ordered = [...priced, ...highlights.filter((item) => !priced.includes(item))];
+    const highlight = ordered.length ? clip(ordered.slice(0, 2).join(" "), 520) : undefined;
     const excerpt = !highlight && hit.text ? clip(hit.text, 400) : undefined;
     sources.push({
       url: hit.url,
@@ -120,7 +132,7 @@ export function mergeHitsIntoRaw(raw: RawSearch, hits: RawHit[]): RawSearch {
         ...result,
         title: result.title || hit.title,
         publishedDate: result.publishedDate || hit.publishedDate,
-        highlights: hit.highlights?.length ? hit.highlights : result.highlights,
+        highlights: mergeHighlights(result.highlights, hit.highlights),
         text: hit.text ?? result.text,
         summary: hit.summary ?? result.summary,
       };

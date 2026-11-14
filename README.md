@@ -95,4 +95,4 @@ The app is Next.js App Router, TypeScript, and Tailwind, with no custom server. 
 
 ## Live run
 
-A live Exa run with a real key is already done: three searches, HTTP 200, about 8.6–12.3 seconds, no crashes. The follow-up fixes in this branch were checked here with unit tests and fixtures, because this environment still has no `EXA_API_KEY`. The live searches need to be run again after these filters, on a machine that has the key.
+A live Exa run of the Siemens, Allen-Bradley, and Danfoss cases, plus Omron NX1P2-1140DT, ABB ACS580, Mitsubishi FX3U, and Schneider Altivar, finished in about 13–20 seconds. Every path returned sources. Prices are the digits printed next to that part: a "Save $111.45" line is not the unit price, a neighbouring order number's price is dropped, and a page that never says new or used is labelled Listed. Finland still prefers a sourced EU offer. A figure that is not on the cited page stays "not found".

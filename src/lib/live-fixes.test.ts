@@ -6,7 +6,7 @@ import { EXAMPLES } from "./examples";
 import { filterHits, numbersAreVerbatim, rehomeRepairHits } from "./evidence";
 import { parseFreeText } from "./freetext";
 import { parseIntake } from "./intake";
-import { mentionsPart } from "./part";
+import { conflictsWithPart, familyTerms, mentionsPart } from "./part";
 import { buildPathPlans, extraSearches } from "./paths";
 import type { Intake, PathId, RawHit, RawSearch } from "./types";
 
@@ -628,6 +628,416 @@ test("recommendation citations have to mention this unit", () => {
   );
   assert.equal(recommendation.sources.length, 1);
   assert.match(recommendation.sources[0]?.url ?? "", /danfoss\.com/);
+});
+
+test("live price strings keep every digit, prefer the cheaper EU unit, and ignore a repair price", () => {
+  const spaced = buildCard(
+    plan(allenBradley, "new"),
+    raw([
+      {
+        url: "https://www.dosupply.com/automation/allen-bradley-plc/controllogix/1756-L71",
+        title: "1756-L71",
+        highlights: ["Refurbished Ships Mon $1731 .00 9 in stock"],
+      },
+    ]),
+  );
+  assert.match(spaced.estimatedCost, /\$1731\.00/);
+  assert.match(spaced.estimatedCost, /Refurbished/);
+  assert.equal(/\$731(?!\d)/.test(spaced.estimatedCost), false);
+
+  const european = buildCard(
+    plan(siemens, "new"),
+    raw([
+      {
+        url: "https://www.unisgroup.com/products/6av6642-0ba01-1ax1/",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: [
+          "Used Refurbished Warranty 2 year € 890, 00 (€ 1.076, 90 incl. VAT). You can send it to us for repair. € 728, 00",
+        ],
+      },
+      {
+        url: "https://shop.example.de/6AV6642-0BA01-1AX1",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["6AV6642-0BA01-1AX1 new €1.290,00 in stock"],
+      },
+      {
+        url: "https://surplusrecord.com/listing/6AV6642-0BA01-1AX1",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["6AV6642-0BA01-1AX1 Precio: $449 USD"],
+      },
+    ]),
+  );
+  assert.match(european.estimatedCost, /€1\.290,00/);
+  assert.match(european.estimatedCost, /New/);
+  assert.equal(european.estimatedCost.includes("728"), false);
+  assert.equal(european.estimatedCost.includes("890"), false);
+  assert.equal(european.estimatedCost.includes("449"), false);
+  assert.equal(european.estimatedCost.includes("1.076"), false);
+  assert.match(
+    european.claims.find((claim) => claim.label === "Estimated cost")?.sources[0]?.url ?? "",
+    /shop\.example\.de/,
+  );
+
+  const cheaperEu = buildCard(
+    plan(siemens, "used"),
+    raw([
+      {
+        url: "https://www.ebay.com/itm/6AV6642-0BA01-1AX1",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["6AV6642-0BA01-1AX1 used $400"],
+      },
+      {
+        url: "https://shop.example.de/6AV6642-0BA01-1AX1",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["6AV6642-0BA01-1AX1 used 1.100,00 EUR in stock"],
+      },
+    ]),
+  );
+  assert.match(cheaperEu.estimatedCost, /1\.100,00 EUR/);
+  assert.equal(cheaperEu.estimatedCost.includes("400"), false);
+
+  const krona = buildCard(
+    plan(schneider(), "new"),
+    raw([
+      {
+        url: "https://j-automatic.se/produkt/atv320u15n4c/",
+        title: "ATV320U15N4",
+        highlights: ["ATV320U15N4 5 880 kr inkl. moms"],
+      },
+    ]),
+  );
+  assert.match(krona.estimatedCost, /5 880 kr/);
+  assert.match(krona.estimatedCost, /SEK|kr/);
+});
+
+test("a discount, a stray low figure, and a silent listing are not sold as the unit price", () => {
+  const omron: Intake = {
+    manufacturer: "Omron",
+    partNumber: "NX1P2-1140DT",
+    symptom: "NX1P2 ERR LED flashing",
+    country: "FI",
+    urgency: "emergency",
+  };
+  const cpu = buildCard(
+    plan(omron, "used"),
+    raw([
+      {
+        url: "https://iainventory.com/products/nx1p2-1140dt",
+        title: "NX1P2-1140DT",
+        highlights: [
+          "Save $111.45 New Surplus - $742.93 Refurbished - $646.03 Used - $561.77 Sale price $742.93",
+        ],
+      },
+    ]),
+  );
+  assert.match(cpu.estimatedCost, /\$561\.77/);
+  assert.equal(cpu.estimatedCost.includes("111.45"), false);
+
+  const abb: Intake = {
+    manufacturer: "ABB",
+    partNumber: "ACS580-01-012A-4",
+    symptom: "ACS580 overcurrent",
+    country: "FI",
+    urgency: "emergency",
+  };
+  const drive = buildCard(
+    plan(abb, "used"),
+    raw([
+      {
+        url: "https://priceofparts.com/part/acs580-01-012a-4/",
+        title: "ACS580-01-012A-4",
+        highlights: ["ACS580-01-012A-4 used $82.36. Refurbished $1,663.00"],
+      },
+    ]),
+  );
+  assert.match(drive.estimatedCost, /\$1,663\.00/);
+  assert.equal(drive.estimatedCost.includes("82.36"), false);
+
+  const listed = buildCard(
+    plan(schneider(), "used"),
+    raw([
+      {
+        url: "https://j-automatic.se/produkt/atv320u15n4c/",
+        title: "ATV320U15N4",
+        highlights: ["ATV320U15N4 5 880 kr inkl. moms"],
+      },
+    ]),
+  );
+  assert.match(listed.estimatedCost, /^Listed/);
+  assert.equal(listed.estimatedCost.startsWith("Used"), false);
+
+  const repair = buildCard(
+    plan(omron, "repair"),
+    raw([
+      {
+        url: "https://classicautomation.com/nx1p2-1140dt",
+        title: "NX1P2-1140DT",
+        highlights: ["NX1P2-1140DT for sale $1,606.00 In stock"],
+      },
+    ]),
+  );
+  assert.equal(repair.estimatedCost, "not found");
+  assert.equal(repair.leadTime, "not found");
+
+  const related = buildCard(
+    plan(abb, "used"),
+    raw([
+      {
+        url: "https://texnite.com/acs580-01-012a-4-never-used-surplus/",
+        title: "ACS580-01-012A-4 Never Used Surplus",
+        highlights: [
+          "ACS580-01-012A-4 Condition: New 7 in stock $2,755.98 Related Products ACS580-01-026A-4 Never Used Surplus $1,374.46",
+        ],
+      },
+    ]),
+  );
+  assert.match(related.estimatedCost, /\$2,755\.98/);
+  assert.match(related.estimatedCost, /^New/);
+  assert.equal(related.estimatedCost.includes("1,374.46"), false);
+
+  const surplus = buildCard(
+    plan(siemens, "new"),
+    raw([
+      {
+        url: "https://www.s7automation.com/product/siemens-6av6642-0ba01-1ax1-4/",
+        title: "SIEMENS 6AV6642-0BA01-1AX1",
+        highlights: [
+          "6AV6642-0BA01-1AX1 € 863.00 13 in stock. Product Condition: PKX (Surplus in S7Automation package).",
+        ],
+      },
+    ]),
+  );
+  assert.match(surplus.estimatedCost, /863/);
+  assert.match(surplus.estimatedCost, /^Listed/);
+  assert.equal(surplus.estimatedCost.startsWith("New"), false);
+
+  const inflated = buildCard(
+    plan(siemens, "new"),
+    raw([
+      {
+        url: "https://shop.example.com/6AV6642-0BA01-1AX1",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["6AV6642-0BA01-1AX1 New $780.00 10000 in stock"],
+      },
+    ]),
+  );
+  assert.equal(inflated.leadTime, "in stock");
+  assert.equal(inflated.leadTime.includes("10000"), false);
+});
+
+function schneider(): Intake {
+  return {
+    manufacturer: "Schneider",
+    partNumber: "ATV320U15N4",
+    symptom: "Altivar fault code OCF",
+    country: "FI",
+    urgency: "emergency",
+  };
+}
+
+test("a new listing stays new, and a generic module range is not this CPU's repair price", () => {
+  const fresh = buildCard(
+    plan(allenBradley, "new"),
+    raw([
+      {
+        url: "https://www.mroelectric.com/product/1756-L71",
+        title: "1756-L71",
+        highlights: ["1756-L71 New $1,816.00 Ships Today. Often used in a ControlLogix rack."],
+      },
+    ]),
+  );
+  assert.match(fresh.estimatedCost, /New/);
+  assert.match(fresh.estimatedCost, /\$1,816\.00/);
+  assert.equal(/^Used/.test(fresh.estimatedCost), false);
+
+  const repair = buildCard(
+    plan(allenBradley, "repair"),
+    raw([
+      {
+        url: "https://www.controlboardlab.com/parts/1756-l71/",
+        title: "1756-L71 Repair",
+        highlights: ["1756-L71 processor. Replacement: ~$1,690 sealed surplus. CPUs are test-and-verify."],
+      },
+      {
+        url: "https://www.controlboardlab.com/services/plc-module-repair/",
+        title: "PLC Module Repair",
+        highlights: ["ControlLogix (1756) modules. Free evaluation, typical repairs $250–$650."],
+      },
+    ]),
+  );
+  assert.equal(repair.estimatedCost, "not found");
+  assert.equal(
+    repair.claims.some((claim) => /250|1,690|1690/.test(claim.value)),
+    false,
+  );
+  assert.equal(repair.sources.length, 2);
+
+  const sale = buildCard(
+    plan(siemens, "repair"),
+    raw([
+      {
+        url: "https://eshop.foxon.eu/p/6av6642-0ba01-1ax1-repair-and-sale",
+        title: "6AV6642-0BA01-1AX1",
+        highlights: ["Sales, Repair, Purchase from 956 EUR excl. VAT. Total in stock: 77 pcs."],
+      },
+      {
+        url: "https://www.controlboardlab.com/parts/6av6642-0ba01-1ax1/",
+        title: "6AV6642-0BA01-1AX1 Repair",
+        highlights: ["Flat repair price $349 for the 6AV6642-0BA01-1AX1. 3–5 business days in lab."],
+      },
+    ]),
+  );
+  assert.match(sale.estimatedCost, /\$349/);
+  assert.equal(sale.estimatedCost.includes("956"), false);
+  assert.match(sale.leadTime, /3–5 business days/);
+});
+
+test("a different order number is not this unit, and a failed path is not the recommendation", () => {
+  assert.equal(
+    conflictsWithPart("datasheet 6AV6642-0DA01-1AX1", "6AV6642-0BA01-1AX1"),
+    true,
+  );
+  assert.equal(
+    conflictsWithPart("https://example.com/1756-L9S/faults", "1756-L71"),
+    true,
+  );
+  assert.equal(conflictsWithPart("manual 1756-L71 and 1756-L72", "1756-L71"), false);
+  assert.equal(conflictsWithPart("FX3U-64MT/ESS sales", "FX3U-64MR/ES"), true);
+  assert.equal(conflictsWithPart("https://example.com/atv320u15n4c", "ATV320U15N4"), false);
+  const terms = familyTerms({
+    manufacturer: "Siemens",
+    partNumber: "6AV6642-0BA01-1AX1",
+    symptom: "TP177B black screen",
+  });
+  assert.equal(terms.includes("6AV6642"), false);
+  assert.ok(terms.includes("TP177B"));
+
+  const cards = [
+    buildCard(plan(siemens, "repair"), { error: "Exa rate-limited this search.", results: [] }),
+    buildCard(
+      plan(siemens, "used"),
+      raw([
+        {
+          url: "https://www.unisgroup.com/products/6av6642-0ba01-1ax1/",
+          title: "6AV6642-0BA01-1AX1",
+          highlights: ["6AV6642-0BA01-1AX1 used € 890, 00 in stock"],
+        },
+      ]),
+    ),
+  ];
+  const cited = recommendationFromAnswer(
+    {
+      recommendedPath: "used",
+      reason: "Buy the used panel that is in stock.",
+      urgencyNote: "Line down.",
+      caveats: [],
+    },
+    [
+      {
+        url: "https://mall.industry.siemens.com/teddatasheet/?mlfbs=6AV6642-0DA01-1AX1",
+        title: "mall.industry.siemens.com",
+      },
+      {
+        url: "https://www.rockwellautomation.com/docs/1756-l9s/clear-controller-faults.html",
+        title: "Clear controller faults",
+      },
+      {
+        url: "https://support.industry.siemens.com/forum/tp177b",
+        title: "TP177B backlight dead on 6AV6642-0BA01-1AX1",
+      },
+    ],
+    siemens,
+    cards,
+  );
+  assert.equal(cited.pathId, "used");
+  assert.equal(cited.sources.length, 1);
+  assert.match(cited.sources[0]?.title ?? "", /6AV6642-0BA01-1AX1/);
+  assert.equal(cited.sources.some((source) => source.url.includes("0DA01")), false);
+  assert.equal(cited.sources.some((source) => source.url.includes("1756-l9s")), false);
+
+  const recommendation = recommendationFromAnswer(
+    {
+      recommendedPath: "repair",
+      reason: "The unit is obsolete, so send it to a shop.",
+      urgencyNote: "Line down.",
+      caveats: [],
+    },
+    [],
+    siemens,
+    cards,
+  );
+  assert.equal(recommendation.pathId, "used");
+  assert.equal(recommendation.via, "urgency-rule");
+  assert.equal(
+    recommendation.sources.some((source) => source.url.includes("0DA01")),
+    false,
+  );
+  assert.equal(recommendation.sources.some((source) => source.url.includes("1756-l9s")), false);
+  assert.match(recommendation.caveats.join(" "), /discontinuation notice/);
+});
+
+test("repair-shop pages leave DIY, and unseen families still match the symptom", () => {
+  const plans = buildPathPlans(siemens, now);
+  const raws = new Map(plans.map((item) => [item.id, { results: [] as RawHit[] }]));
+  raws.set("diy", {
+    results: [
+      {
+        url: "https://www.spea-servis.cz/en/servisujeme/siemens/6av6642-0ba01-1ax1",
+        title: "Siemens 6AV6642-0BA01-1AX1 repair",
+        highlights: ["Repair service for 6AV6642-0BA01-1AX1."],
+      },
+      {
+        url: "https://support.industry.siemens.com/forum/tp177b",
+        title: "TP177B backlight",
+        highlights: ["6AV6642-0BA01-1AX1 backlight stays dark."],
+      },
+    ],
+  });
+  rehomeRepairHits(plans, raws);
+  const diy = buildCard(plan(siemens, "diy"), raws.get("diy") ?? { results: [] });
+  const repair = buildCard(plan(siemens, "repair"), raws.get("repair") ?? { results: [] });
+  assert.match(diy.sources[0]?.url ?? "", /forum/);
+  assert.equal(diy.sources.some((source) => source.url.includes("spea")), false);
+  assert.match(repair.sources[0]?.url ?? "", /spea/);
+
+  const schneider: Intake = {
+    manufacturer: "Schneider",
+    partNumber: "ATV320U15N4",
+    symptom: "Altivar fault code OCF at start",
+    country: "FI",
+    urgency: "emergency",
+  };
+  const abb: Intake = {
+    manufacturer: "ABB",
+    partNumber: "ACS580-01-012A-4",
+    symptom: "ACS580 drive fault overcurrent at start",
+    country: "FI",
+    urgency: "emergency",
+  };
+  const mitsubishi: Intake = {
+    manufacturer: "Mitsubishi",
+    partNumber: "FX3U-64MR/ES",
+    symptom: "FX3U PLC outputs dead",
+    country: "FI",
+    urgency: "this-week",
+  };
+  assert.ok(familyTerms(schneider).includes("ATV320"));
+  assert.ok(familyTerms(schneider).includes("Altivar"));
+  assert.ok(familyTerms(abb).includes("ACS580"));
+  assert.ok(familyTerms(mitsubishi).includes("FX3U"));
+
+  const drive = buildCard(
+    plan(schneider, "diy"),
+    raw([
+      {
+        url: "https://www.se.com/altivar-320-ocf",
+        title: "Altivar 320 OCF",
+        highlights: ["ATV320 OCF is an overcurrent fault. Check the motor cable."],
+      },
+    ]),
+  );
+  assert.equal(drive.sources.length, 1);
+  assert.equal(drive.estimatedCost, "not found");
 });
 
 test("the research API accepts a one-sentence query", () => {
