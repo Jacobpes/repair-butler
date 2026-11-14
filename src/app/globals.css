@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --background: #efeae1;
+  --foreground: #1c1915;
+  --paper: #f7f3ec;
+  --ink: #1c1915;
+  --muted: #5c564c;
+  --line: #e0d5c6;
+  --copper: #9a4e2c;
+  --copper-deep: #6f3418;
+  --pine: #1d6b48;
+  --pine-soft: #e4f2ea;
+  --amber: #8a4b08;
+  --amber-soft: #f8ecd4;
+  --danger: #8f2d2d;
+  --danger-soft: #f8e4e2;
+  --card: #fffdf9;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #12100e;
+    --foreground: #f4efe7;
+    --paper: #1a1714;
+    --ink: #f4efe7;
+    --muted: #c4b8a8;
+    --line: #3a332c;
+    --copper: #f0b08a;
+    --copper-deep: #e08a62;
+    --pine: #9ed7b8;
+    --pine-soft: #1a2e24;
+    --amber: #f0c27a;
+    --amber-soft: #332816;
+    --danger: #f0b0aa;
+    --danger-soft: #3a2220;
+    --card: #221e1a;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-copper: var(--copper);
+  --color-copper-deep: var(--copper-deep);
+  --color-pine: var(--pine);
+  --color-pine-soft: var(--pine-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-card: var(--card);
+  --font-sans: var(--font-plex);
+  --font-mono: var(--font-plex-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--copper) 35%, white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}
