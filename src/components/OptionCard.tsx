@@ -18,11 +18,13 @@ const STATUS_CLASS = {
 export function OptionCard({
   card,
   recommended,
+  fastest,
   selected,
   onSelect,
 }: {
   card: PathCard;
   recommended: boolean;
+  fastest: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -41,6 +43,7 @@ export function OptionCard({
           <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-copper">
             {card.trace.searchType}
             {recommended ? " · recommended" : ""}
+            {fastest ? " · fastest" : ""}
           </p>
           <h3 className="mt-1 text-lg font-medium tracking-tight">{card.title}</h3>
           <p className="text-sm text-muted">{card.summary}</p>
@@ -219,6 +222,10 @@ export function RecommendationBanner({ recommendation }: { recommendation: Recom
           : "No path to recommend yet"}
       </h2>
       <p className="mt-2 text-sm leading-relaxed">{recommendation.reason}</p>
+      <p className="mt-2 text-sm leading-relaxed">
+        <span className="font-medium">Fastest sourced option. </span>
+        {recommendation.fastestNote}
+      </p>
       <p className="mt-2 text-sm text-muted">{recommendation.urgencyNote}</p>
       {recommendation.caveats.length > 0 ? (
         <ul className="mt-3 list-disc space-y-1 pl-4 text-sm text-muted">

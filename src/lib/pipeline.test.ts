@@ -16,7 +16,7 @@ import { looksQuantitative } from "./text";
 
 const intake: Intake = {
   manufacturer: "Siemens",
-  partNumber: "6AV6643-0CD01-1AX1",
+  partNumber: "6AV6642-0BA01-1AX1",
   symptom: "TP177B black screen, backlight dead",
   country: "FI",
   urgency: "emergency",
@@ -37,7 +37,7 @@ test("path plans use fast, auto, and deep with the filters each path needs", () 
   assert.equal(byId.diy?.searchType, "auto");
   assert.equal(byId.diy?.userLocation, undefined);
   assert.ok(byId.diy?.excludeDomains?.includes("ebay.com"));
-  assert.match(byId.diy?.query ?? "", /6AV6643-0CD01-1AX1/);
+  assert.match(byId.diy?.query ?? "", /6AV6642-0BA01-1AX1/);
 
   assert.equal(byId.repair?.searchType, "auto");
   assert.equal(byId.repair?.category, "company");
@@ -75,7 +75,9 @@ test("unsourced prices are withheld and overlapping failure notes are kept", () 
       {
         url: "https://forum.example/tp177b",
         title: "TP177B black screen",
-        highlights: ["The backlight inverter fails and the screen stays black."],
+        highlights: [
+          "6AV6642-0BA01-1AX1. The backlight inverter fails and the screen stays black.",
+        ],
         publishedDate: "2024-04-02T00:00:00.000Z",
       },
     ],
@@ -120,14 +122,15 @@ test("a grounded price keeps its citation, quote, and date", () => {
       {
         url: "https://shop.example/item",
         title: "Radwell listing",
-        highlights: ["Refurbished unit, price EUR 640, tested."],
+        highlights: ["6AV6642-0BA01-1AX1 refurbished unit, price EUR 640, tested."],
         publishedDate: "2026-03-01T00:00:00.000Z",
       },
     ],
   });
 
   const cost = card.claims.find((claim) => claim.label === "Estimated cost");
-  assert.equal(card.estimatedCost, "EUR 640");
+  assert.match(card.estimatedCost, /Refurbished/);
+  assert.match(card.estimatedCost, /EUR 640/);
   assert.equal(cost?.sources[0]?.url, "https://shop.example/item");
   assert.match(cost?.sources[0]?.highlight ?? "", /EUR 640/);
   assert.equal(cost?.sources[0]?.publishedDate, "2026-03-01T00:00:00.000Z");
@@ -183,12 +186,12 @@ test("answer prompt carries sourced figures only", () => {
       {
         url: "https://forum.example/tp177b",
         title: "Notes",
-        highlights: ["The backlight inverter fails on this panel."],
+        highlights: ["6AV6642-0BA01-1AX1. The backlight inverter fails on this panel."],
       },
     ],
   });
   const prompt = buildAnswerPrompt(intake, [card]);
-  assert.match(prompt, /6AV6643-0CD01-1AX1/);
+  assert.match(prompt, /6AV6642-0BA01-1AX1/);
   assert.equal(prompt.includes("9999"), false);
   assert.match(prompt, /backlight inverter/);
 });
@@ -218,7 +221,7 @@ test("emergency fallback prefers a sourced used listing over an unsourced repair
         {
           url: "https://shop.example/item",
           title: "Listing",
-          highlights: ["EUR 640"],
+          highlights: ["6AV6642-0BA01-1AX1 EUR 640 in stock"],
         },
       ],
     },
@@ -230,7 +233,9 @@ test("emergency fallback prefers a sourced used listing over an unsourced repair
   const recommendation = fallbackRecommendation(intake, [used, repair]);
   assert.equal(recommendation.pathId, "used");
   assert.equal(recommendation.via, "urgency-rule");
+  assert.equal(recommendation.fastestPathId, "used");
   assert.match(recommendation.reason, /workshop rule/);
+  assert.match(recommendation.fastestNote, /in stock/);
 });
 
 test("an answer that smuggles a price without citations loses the figure", () => {
@@ -258,7 +263,7 @@ test("repair drafts stay on the technician and used drafts are checklists", () =
       {
         url: "https://shop.example/repair",
         title: "Workshop",
-        highlights: ["Email service@radwell.eu for a quote."],
+        highlights: ["Email service@radwell.eu about 6AV6642-0BA01-1AX1 for a quote."],
       },
     ],
     output: { content: { headline: "not found", estimatedCost: "not found", leadTime: "not found", risk: "unknown", keyFacts: [], pros: [], cons: [] } },
@@ -269,7 +274,7 @@ test("repair drafts stay on the technician and used drafts are checklists", () =
   assert.equal(email.kind, "email");
   assert.equal(email.recipient, "service@radwell.eu");
   assert.match(email.mailto, /^mailto:service@radwell\.eu\?/);
-  assert.match(email.body, /6AV6643-0CD01-1AX1/);
+  assert.match(email.body, /6AV6642-0BA01-1AX1/);
   assert.match(email.body, /has not been sent/);
 
   const bare = buildAction(
@@ -303,9 +308,9 @@ test("sse frames split cleanly and keep a partial frame", () => {
 
 test("nameplate JSON can arrive fenced", () => {
   const reading = parseNameplateJson(
-    '```json\n{"manufacturer":"Siemens","partNumber":"6AV6643-0CD01-1AX1","notes":"TP177B"}\n```',
+    '```json\n{"manufacturer":"Siemens","partNumber":"6AV6642-0BA01-1AX1","notes":"TP177B"}\n```',
   );
   assert.equal(reading?.manufacturer, "Siemens");
-  assert.equal(reading?.partNumber, "6AV6643-0CD01-1AX1");
+  assert.equal(reading?.partNumber, "6AV6642-0BA01-1AX1");
   assert.equal(parseNameplateJson('{"manufacturer":"","partNumber":""}'), null);
 });

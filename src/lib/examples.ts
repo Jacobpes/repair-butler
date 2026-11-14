@@ -12,7 +12,7 @@ export const EXAMPLES: Example[] = [
     label: "Siemens TP177B",
     blurb: "Black screen",
     manufacturer: "Siemens",
-    partNumber: "6AV6643-0CD01-1AX1",
+    partNumber: "6AV6642-0BA01-1AX1",
     symptom:
       "TP177B 6 inch color PN/DP HMI. Black screen, backlight dead. The unit powers on but the display stays dark.",
     country: "FI",

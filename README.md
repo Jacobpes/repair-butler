@@ -12,7 +12,7 @@ The options sit side by side with cost, lead time, and risk. Every price, stock 
 
 Nothing is ordered and nothing is emailed. The technician picks a path, gets a draft inquiry or a purchase checklist, and sends it themselves.
 
-The demo cases are real parts a Finnish shop would actually have on the bench, including the Siemens TP177B from the Junction brief. JP Electronix AB is the kind of workshop this is for.
+The demo cases are real parts a Finnish shop would actually have on the bench. The Siemens example is a TP177B, MLFB `6AV6642-0BA01-1AX1`. The Junction brief’s `6AV6643-0CD01-1AX1` is an MP 277 10 inch Touch, so the app does not use it as the TP177B. JP Electronix AB is the kind of workshop this is for. A judge can also paste one sentence, such as `Danfoss FC302 131B0081 alarm 14 earth fault, Finland, urgent`, and the form fills manufacturer, part number, symptom, country, and urgency.
 
 ## How Exa is used
 
@@ -23,10 +23,12 @@ Five searches run in parallel. The UI streams server-sent events as each one ret
 | Path | Search type | Why this type | Filters and contents |
 | --- | --- | --- | --- |
 | DIY repair | `auto` | Failure notes are spread across forums and manuals | `excludeDomains` drops marketplaces. Highlights steered at failure modes. |
-| Repair service | `auto` | Company pages, not a keyword dump | `category: "company"` and `userLocation` set to the technician’s country. |
-| Used or refurbished | `fast` | Listings should come back quickly, and `fast` still accepts a schema | `includeDomains` (eBay, Radwell, EU Automation, and other surplus dealers) and `startPublishedDate` 18 months back, so the listings are current. |
+| Repair service | `auto` | Company pages, not a keyword dump | `category: "company"` and `userLocation` for a local shop, plus a second search with no country bias so an EU specialist is still found. A page is kept only when it names the part or its family and actually talks about repair. |
+| Used or refurbished | `fast` | Listings should come back quickly, and `fast` still accepts a schema | One search covers marketplaces and surplus dealers. A second search is surplus only (Radwell, PLC City, EU Automation, and similar), so eBay cannot fill every slot. `startPublishedDate` is 18 months back. |
 | New unit | `fast` | Distributor pages, same reason | `userLocation` for the technician’s country. No domain lock, so a local distributor is not dropped. |
-| Successor | `deep` | Discontinuation is a multi-step question | `additionalQueries` for the discontinuation notice and the official replacement. Marketplaces excluded. |
+| Successor | `deep` | Discontinuation is a multi-step question | `additionalQueries` for the discontinuation notice and the official replacement. A page must name the exact part and a discontinuation or successor. A shop price with no successor language is dropped. |
+
+DIY, used, new, and successor hits must show the exact part number (spaces and dashes ignored, so `1756-L71` does not match `1756-L710`). A repair page can name the family instead, and it still has to be about repair. Social posts and, on the buy paths, news URLs and listings older than the stale cutoff are dropped too. A price or lead time is shown only when that string is in the quoted highlight. For Finland the original price stays, with a labeled EUR conversion when the page used another currency, and every price is marked new, used, refurbished, or repair. A pack price is labeled with its quantity. On a line-down job, a repair card with no sourced price and no sourced turnaround does not outrank an in-stock buy, and the banner always names the fastest sourced purchase.
 
 `fast` is the low-latency type the brief names. Exa’s newer `lite` type is cheaper, but it rejects `outputSchema`, summaries, and several other fields. Listings stay on `fast` so each path can return structured JSON.
 
@@ -41,7 +43,7 @@ After the five searches, one `getContents` call reads the best URL from each pat
 
 Finally `exa.answer` takes only the figures that survived the source check, with `outputSchema` for `recommendedPath`, `reason`, `urgencyNote`, and `caveats`, plus `userLocation`. If Answer fails or does not name a path, a visible workshop rule ranks the paths that already have sources. That rule is labeled as a rule, not as a web fact.
 
-Field-level `output.grounding` is required before a cost or lead time is shown. A finding with a price, a duration, or a stock count also needs a citation whose page text overlaps the claim. Pros and cons that contain a number are dropped. Assessments that remain are labeled as a reading of the linked pages.
+A cost or lead time is shown when the quoted highlight contains that string. Structured grounding is used when it cites one of those pages, and a highlight is used when grounding misses a figure that is already printed there. A number that is not in the quoted text is dropped, including a model figure and a grounding link that is not in the filtered results. Pros and cons that contain a number are kept only when that number is in a kept page. Assessments that remain are labeled as a reading of the linked pages.
 
 ## Setup
 
@@ -84,13 +86,13 @@ The app is Next.js App Router, TypeScript, and Tailwind, with no custom server. 
 
 ## Pitch script
 
-1. Open the app. Click **Siemens TP177B**. Say this is a dead HMI on a running line in Finland, the sort of job JP Electronix actually gets.
+1. Open the app. Click **Siemens TP177B** (`6AV6642-0BA01-1AX1`). Say this is a dead HMI on a running line in Finland, the sort of job JP Electronix actually gets.
 2. Watch five paths light up. Point at the search type on each card: auto, fast, and deep, running together.
 3. Open a price or a lead time. It links to a page title, a quoted highlight, and a date. If that slot says **not found**, say the model was not allowed to invent it.
 4. Scroll the sources panel. The same URLs are grouped by path.
 5. Click **Prepare this option** on the used unit or the repair shop. Show the checklist or the mailto draft. Copy it. Say nothing left the browser.
-6. Hand the keyboard over. The judge types their own manufacturer, part number, and symptom, and the same five searches run.
+6. Hand the keyboard over. The judge pastes one sentence, or types a manufacturer, part number, and symptom, and the same five searches run.
 
-## Live run in this environment
+## Live run
 
-`EXA_API_KEY` was not set in the environment that built this pull request, and neither was a vision key. The search route was called and returned the 503 above. Unit tests cover source gating, the five Exa query plans, the approval drafts, and the stream parser. A live Exa run still needs a key in `.env.local`.
+A live Exa run with a real key is already done: three searches, HTTP 200, about 8.6–12.3 seconds, no crashes. The follow-up fixes in this branch were checked here with unit tests and fixtures, because this environment still has no `EXA_API_KEY`. The live searches need to be run again after these filters, on a machine that has the key.

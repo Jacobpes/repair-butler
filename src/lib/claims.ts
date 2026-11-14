@@ -1,3 +1,5 @@
+import { commercialFacts, filterHits, numbersAreVerbatim, sourceText } from "@/lib/evidence";
+import { mentionsPart } from "@/lib/part";
 import { traceFromPlan } from "@/lib/paths";
 import type {
   Claim,
@@ -180,12 +182,7 @@ function sourcesForField(
       const known = pool.find(
         (source) => normalizeUrl(source.url) === normalizeUrl(citation.url ?? ""),
       );
-      sources.push(
-        known ?? {
-          url: citation.url,
-          title: citation.title?.trim() || siteHost(citation.url),
-        },
-      );
+      if (known) sources.push(known);
     }
   }
   return dedupeSources(sources);
@@ -205,11 +202,6 @@ export function sourcesMentioning(fact: string, sources: Source[]): Source[] {
   });
 }
 
-function gateField(value: string, sources: Source[]): string {
-  if (isNotFound(value) || sources.length === 0) return "not found";
-  return clip(value, 160);
-}
-
 function acceptHeadline(
   headline: string,
   grounding: RawGrounding[],
@@ -220,13 +212,27 @@ function acceptHeadline(
   }
   const grounded = sourcesForField(grounding, "headline", pool);
   const overlapped = sourcesMentioning(headline, pool);
-  if (looksQuantitative(headline) && grounded.length === 0) {
+  const quoted = pool.map((source) => sourceText(source)).join(" ");
+  if (looksQuantitative(headline) && !numbersAreVerbatim(headline, quoted)) {
     return pool.length ? GENERIC_HEADLINE : "not found";
   }
   if (grounded.length === 0 && overlapped.length === 0) {
     return pool.length ? GENERIC_HEADLINE : "not found";
   }
   return clip(headline, 280);
+}
+
+function supportsFact(fact: string, source: Source, plan: PathPlan): boolean {
+  const text = sourceText(source);
+  if (looksQuantitative(fact) && !numbersAreVerbatim(fact, text)) return false;
+  if (/free evaluation/i.test(fact) && !/free evaluation/i.test(text)) return false;
+  if (
+    /this model|this exact part|repairs this/i.test(fact) &&
+    !mentionsPart(text, plan.partNumber)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function emptyClaims(): Claim[] {
@@ -264,46 +270,40 @@ export function buildCard(plan: PathPlan, raw: RawSearch): PathCard {
 
   const content = readOutputContent(raw.output);
   const grounding = raw.grounding ?? [];
-  const pool = sourcesFromHits(raw.results);
-  const costSources = sourcesForField(grounding, "estimatedCost", pool);
-  const leadSources = sourcesForField(grounding, "leadTime", pool);
-  const estimatedCost = gateField(fieldText(content, "estimatedCost"), costSources);
-  const leadTime = gateField(fieldText(content, "leadTime"), leadSources);
+  const pool = sourcesFromHits(filterHits(plan, raw.results));
+  const commercial = commercialFacts(plan, pool, {
+    cost: fieldText(content, "estimatedCost"),
+    lead: fieldText(content, "leadTime"),
+  });
+  const estimatedCost = commercial.estimatedCost;
+  const leadTime = commercial.leadTime;
   const claims: Claim[] = [
     {
       label: "Estimated cost",
       value: estimatedCost,
-      sources: estimatedCost === "not found" ? [] : costSources,
+      sources: commercial.costSources,
     },
     {
       label: "Lead time",
       value: leadTime,
-      sources: leadTime === "not found" ? [] : leadSources,
+      sources: commercial.leadSources,
     },
   ];
 
   fieldList(content, "keyFacts")
     .slice(0, 4)
-    .forEach((fact, index) => {
-      const specific = sourcesForField(grounding, `keyFacts[${index}]`, pool);
-      const parent = sourcesForField(grounding, "keyFacts", pool);
-      const overlapped = sourcesMentioning(fact, pool);
-      let sources = dedupeSources([...specific, ...overlapped]);
-      if (looksQuantitative(fact)) {
-        const cited = new Set(
-          [...specific, ...parent].map((source) => normalizeUrl(source.url)),
-        );
-        sources = overlapped.filter((source) => cited.has(normalizeUrl(source.url)));
-        if (sources.length === 0) sources = specific;
-      }
-      if (sources.length === 0) return;
-      claims.push({ label: "Finding", value: clip(fact, 280), sources });
+    .forEach((fact) => {
+      const overlapped = sourcesMentioning(fact, pool).filter((source) =>
+        supportsFact(fact, source, plan),
+      );
+      if (overlapped.length === 0) return;
+      claims.push({ label: "Finding", value: clip(fact, 280), sources: overlapped });
     });
 
   const keepAssessment = (items: string[]) =>
     pool.length === 0
       ? []
-      : items.filter((item) => !isNotFound(item) && !looksQuantitative(item)).slice(0, 3);
+      : items.filter((item) => pool.some((source) => supportsFact(item, source, plan))).slice(0, 3);
 
   const sourcedClaims = claims.filter(
     (claim) => !isNotFound(claim.value) && claim.sources.length > 0,

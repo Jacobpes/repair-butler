@@ -7,6 +7,7 @@ import type { NameplateReading } from "@/lib/nameplate";
 import type { Intake, Urgency } from "@/lib/types";
 
 export type FormValue = {
+  sentence: string;
   manufacturer: string;
   partNumber: string;
   symptom: string;
@@ -28,6 +29,7 @@ export function IntakeForm({
   value,
   onChange,
   onSubmit,
+  onSentence,
   onExample,
   running,
   onCancel,
@@ -35,6 +37,7 @@ export function IntakeForm({
   value: FormValue;
   onChange: (value: FormValue) => void;
   onSubmit: () => void;
+  onSentence: (sentence: string) => void;
   onExample: (exampleId: string) => void;
   running: boolean;
   onCancel: () => void;
@@ -93,9 +96,29 @@ export function IntakeForm({
         <div>
           <h2 className="text-lg font-medium tracking-tight">Faulty unit</h2>
           <p className="mt-1 text-sm text-muted">
-            One click loads a real workshop case and starts the search. Or type your own.
+            Paste one sentence, click a workshop case, or fill the fields.
           </p>
         </div>
+      </div>
+
+      <label className="mt-4 block text-sm font-medium">
+        Paste a sentence
+        <textarea
+          className={`${fieldClass} min-h-20 resize-y`}
+          value={value.sentence}
+          placeholder="Danfoss FC302 131B0081 alarm 14 earth fault, Finland, urgent"
+          onChange={(event) => onChange({ ...value, sentence: event.target.value })}
+        />
+      </label>
+      <div className="mt-3">
+        <button
+          type="button"
+          disabled={running || value.sentence.trim().length === 0}
+          onClick={() => onSentence(value.sentence)}
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-line px-4 py-2 text-sm font-medium hover:border-copper focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-copper disabled:opacity-60"
+        >
+          Search this sentence
+        </button>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -128,7 +151,6 @@ export function IntakeForm({
             className={fieldClass}
             value={value.manufacturer}
             autoComplete="off"
-            required
             onChange={(event) => onChange({ ...value, manufacturer: event.target.value })}
           />
         </label>
@@ -138,7 +160,6 @@ export function IntakeForm({
             className={fieldClass}
             value={value.partNumber}
             autoComplete="off"
-            required
             spellCheck={false}
             onChange={(event) => onChange({ ...value, partNumber: event.target.value })}
           />
@@ -150,7 +171,6 @@ export function IntakeForm({
         <textarea
           className={`${fieldClass} min-h-24 resize-y`}
           value={value.symptom}
-          required
           onChange={(event) => onChange({ ...value, symptom: event.target.value })}
         />
       </label>
@@ -280,6 +300,7 @@ export function intakeFromExample(exampleId: string): FormValue | null {
   const example = EXAMPLES.find((item) => item.id === exampleId);
   if (!example) return null;
   return {
+    sentence: "",
     manufacturer: example.manufacturer,
     partNumber: example.partNumber,
     symptom: example.symptom,

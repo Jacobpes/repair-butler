@@ -1,4 +1,5 @@
 import { countryName } from "@/lib/countries";
+import { sourcedLeadDays } from "@/lib/evidence";
 import type { Intake, PathCard, PathId, Recommendation, Source } from "@/lib/types";
 import { clip, isNotFound, looksQuantitative } from "@/lib/text";
 
@@ -103,7 +104,7 @@ export function fallbackRecommendation(
   if (caveat) caveats.push(caveat);
 
   if (!picked) {
-    return {
+    return withFastest(intake, cards, {
       pathId: null,
       reason:
         "None of the five searches returned a sourced option, so there is nothing to recommend yet.",
@@ -111,17 +112,21 @@ export function fallbackRecommendation(
       caveats,
       sources: [],
       via: "urgency-rule",
-    };
+      fastestPathId: null,
+      fastestNote: "",
+    });
   }
 
-  return {
+  return withFastest(intake, cards, {
     pathId: picked.id,
     reason: `For this urgency, the workshop rule picks ${picked.title} because that path has the strongest sourced pages in this run.`,
     urgencyNote: URGENCY_NOTE[intake.urgency],
     caveats,
     sources: picked.sources.slice(0, 4),
     via: "urgency-rule",
-  };
+    fastestPathId: null,
+    fastestNote: "",
+  });
 }
 
 export function recommendationFromAnswer(
@@ -172,14 +177,79 @@ export function recommendationFromAnswer(
     return { ...fallback, caveats: [...caveats, ...fallback.caveats].slice(0, 4) };
   }
 
-  return {
+  return withFastest(intake, cards, {
     pathId,
     reason,
     urgencyNote,
     caveats,
     sources: citations.slice(0, 6),
     via: "exa-answer",
+    fastestPathId: null,
+    fastestNote: "",
+  });
+}
+
+const NONE_READY = "No sourced in-stock purchase was found.";
+
+function withFastest(
+  intake: Intake,
+  cards: PathCard[],
+  recommendation: Recommendation,
+): Recommendation {
+  const fastest = fastestBuy(cards);
+  const next: Recommendation = {
+    ...recommendation,
+    fastestPathId: fastest?.pathId ?? null,
+    fastestNote: fastest?.note ?? NONE_READY,
   };
+  if (intake.urgency !== "emergency" || next.pathId !== "repair") return next;
+  const repair = cards.find((card) => card.id === "repair");
+  if (!repairIsWeak(repair) || !fastest?.inStockOrSoon) return next;
+  const card = cards.find((item) => item.id === fastest.pathId);
+  return {
+    ...next,
+    pathId: fastest.pathId,
+    via: "urgency-rule",
+    reason: `Line down: ${fastest.note} A repair card without a sourced price and turnaround does not outrank a unit that can ship.`,
+    urgencyNote: URGENCY_NOTE.emergency,
+    caveats: [
+      "Emergency ranking prefers a sourced in-stock purchase over a thin repair lead.",
+      ...next.caveats,
+    ].slice(0, 4),
+    sources: card?.sources.slice(0, 4) ?? [],
+  };
+}
+
+function repairIsWeak(card: PathCard | undefined): boolean {
+  if (!card) return true;
+  if (card.status !== "found") return true;
+  return isNotFound(card.estimatedCost) && isNotFound(card.leadTime);
+}
+
+function fastestBuy(
+  cards: PathCard[],
+): { pathId: PathId; note: string; inStockOrSoon: boolean } | null {
+  const buys = cards.filter(
+    (card) => (card.id === "used" || card.id === "new") && !isNotFound(card.estimatedCost),
+  );
+  if (buys.length === 0) return null;
+  const ranked = [...buys].sort((left, right) => {
+    const leftDays = sourcedLeadDays(left.leadTime);
+    const rightDays = sourcedLeadDays(right.leadTime);
+    if (leftDays === null && rightDays === null) return 0;
+    if (leftDays === null) return 1;
+    if (rightDays === null) return -1;
+    return leftDays - rightDays;
+  });
+  const pick = ranked[0];
+  if (!pick) return null;
+  const days = sourcedLeadDays(pick.leadTime);
+  const inStockOrSoon = days !== null && days <= 7;
+  const note =
+    days === null
+      ? `${pick.title} has a sourced price (${pick.estimatedCost}) but no sourced lead time.`
+      : `${pick.title}: ${pick.leadTime}. ${pick.estimatedCost}.`;
+  return { pathId: pick.id, note, inStockOrSoon };
 }
 
 function readJsonObject(value: string): Record<string, unknown> | null {

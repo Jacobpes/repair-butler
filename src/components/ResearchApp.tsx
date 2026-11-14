@@ -6,12 +6,14 @@ import { intakeFromExample, IntakeForm, toIntake, type FormValue } from "@/compo
 import { OptionCard, PendingCard, RecommendationBanner } from "@/components/OptionCard";
 import { ProgressRail, type Phase } from "@/components/ProgressRail";
 import { SourcesPanel } from "@/components/SourcesPanel";
+import { parseFreeText } from "@/lib/freetext";
 import { parseIntake } from "@/lib/intake";
 import { PATH_META } from "@/lib/paths";
 import { consumeSseBuffer } from "@/lib/sse";
 import type { PathCard, PathId, Recommendation, StatusEvent } from "@/lib/types";
 
 const INITIAL_FORM: FormValue = {
+  sentence: "",
   manufacturer: "",
   partNumber: "",
   symptom: "",
@@ -60,6 +62,23 @@ export function ResearchApp() {
   function stop(reason: "user" | "timeout") {
     reasonRef.current = reason;
     abortRef.current?.abort();
+  }
+
+  function searchSentence(sentence: string) {
+    const parsed = parseFreeText(sentence);
+    if (!parsed.ok) {
+      setError(parsed.message);
+      return;
+    }
+    void start({
+      sentence,
+      manufacturer: parsed.intake.manufacturer,
+      partNumber: parsed.intake.partNumber,
+      symptom: parsed.intake.symptom,
+      country: parsed.intake.country,
+      urgency: parsed.intake.urgency,
+      notes: form.notes,
+    });
   }
 
   async function start(next: FormValue) {
@@ -239,7 +258,14 @@ export function ResearchApp() {
           onChange={setForm}
           running={running}
           onCancel={() => stop("user")}
-          onSubmit={() => void start(form)}
+          onSubmit={() => {
+            if (form.sentence.trim() && (!form.manufacturer.trim() || !form.partNumber.trim())) {
+              searchSentence(form.sentence);
+              return;
+            }
+            void start(form);
+          }}
+          onSentence={searchSentence}
           onExample={(exampleId) => {
             const next = intakeFromExample(exampleId);
             if (next) void start(next);
@@ -273,6 +299,10 @@ export function ResearchApp() {
                   <OptionCard
                     card={card}
                     recommended={recommendation?.pathId === card.id}
+                    fastest={
+                      recommendation?.fastestPathId === card.id &&
+                      recommendation.fastestPathId !== recommendation.pathId
+                    }
                     selected={selected === card.id}
                     onSelect={() => setSelected(card.id)}
                   />

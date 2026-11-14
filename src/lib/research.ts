@@ -5,9 +5,9 @@ import {
   recommendationFromAnswer,
 } from "@/lib/answer";
 import { buildCard, mergeHitsIntoRaw } from "@/lib/claims";
-import { EXTRACTION_PROMPT, HIGHLIGHT_QUERY, buildPathPlans } from "@/lib/paths";
+import { EXTRACTION_PROMPT, HIGHLIGHT_QUERY, buildPathPlans, extraSearches } from "@/lib/paths";
 import type { Intake, PathCard, PathPlan, RawHit, RawSearch, Source } from "@/lib/types";
-import { siteHost } from "@/lib/text";
+import { normalizeUrl, siteHost } from "@/lib/text";
 
 const PATH_OUTPUT_SCHEMA = {
   type: "object",
@@ -106,8 +106,7 @@ export async function runResearch(args: {
       });
       const started = Date.now();
       try {
-        const response = await searchPlan(exa, plan, args.signal);
-        const raw = toRaw(response);
+        const raw = await searchPath(exa, plan, args.signal);
         raws.set(plan.id, raw);
         const card = buildCard(plan, raw);
         card.timingMs = Date.now() - started;
@@ -182,12 +181,52 @@ export async function runResearch(args: {
   });
 }
 
+async function searchPath(exa: Exa, plan: PathPlan, signal: AbortSignal): Promise<RawSearch> {
+  const extras = extraSearches(plan);
+  const [primary, companions] = await Promise.all([
+    searchPlan(exa, plan, signal).then(toRaw),
+    Promise.all(
+      extras.map((extra) =>
+        searchPlan(exa, extra, signal)
+          .then(toRaw)
+          .catch((error: unknown) => {
+            console.error(
+              `Exa ${plan.id} companion failed`,
+              error instanceof Error ? error.message : error,
+            );
+            return { results: [] };
+          }),
+      ),
+    ),
+  ]);
+  return {
+    output: primary.output,
+    grounding: primary.grounding,
+    results: dedupeHits([
+      ...(primary.results ?? []),
+      ...companions.flatMap((companion) => companion.results ?? []),
+    ]),
+  };
+}
+
+function dedupeHits(hits: RawHit[]): RawHit[] {
+  const seen = new Set<string>();
+  const unique: RawHit[] = [];
+  for (const hit of hits) {
+    const key = normalizeUrl(hit.url ?? "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(hit);
+  }
+  return unique;
+}
+
 async function searchPlan(exa: Exa, plan: PathPlan, signal: AbortSignal) {
   const timeout = plan.searchType === "deep" ? 24_000 : plan.searchType === "fast" ? 16_000 : 18_000;
   const request = { signal, timeout };
   const contents = { highlights: { query: HIGHLIGHT_QUERY } };
   const common = {
-    numResults: 5,
+    numResults: plan.numResults,
     contents,
     systemPrompt: EXTRACTION_PROMPT,
     objective: plan.objective,

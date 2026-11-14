@@ -71,6 +71,8 @@ export type Recommendation = {
   caveats: string[];
   sources: Source[];
   via: "exa-answer" | "urgency-rule";
+  fastestPathId: PathId | null;
+  fastestNote: string;
 };
 
 export type Report = {
@@ -107,6 +109,12 @@ export type PathPlan = {
   additionalQueries?: string[];
   userLocation?: string;
   objective: string;
+  partNumber: string;
+  country: string;
+  symptom: string;
+  familyTerms: string[];
+  numResults: number;
+  asOf: string;
 };
 
 export type RawHit = {
